@@ -1,0 +1,22 @@
+.{
+    .name = "zowed",
+    .version = "0.0.0",
+    .minimum_zig_version = "0.13.0-dev.351+64ef45eb0",
+    .dependencies = .{
+        .vulkan_zig = .{
+            .url = "https://github.com/Snektron/vulkan-zig/archive/66b7b773bb61e2102025f2d5ff0ae8c5f53e19cc.tar.gz",
+            .hash = "12208958f173b8b81bfac797955f0416ab38b21d1f69d4ebf6c7ca460a828a41cd45"
+        },
+        .vulkan_headers = .{
+            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/v1.3.283.tar.gz",
+            .hash = "1220a7e73d72a0d56bc2a65f9d8999a7c019e42260a0744c408d1cded111bc205e10",
+        },
+        .sdl = .{
+            .url = "https://github.com/ikskuh/SDL.zig/archive/676bfe080b683fdb9fb15e6e19a80b162b5ae3ca.tar.gz",
+            .hash = "122038b9b453ff147ae669153df58e110844f249376f461581c26f85753d5764ef4d",
+        },
+    },
+    .paths = .{
+        "",
+    },
+}
