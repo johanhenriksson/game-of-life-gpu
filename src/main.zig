@@ -7,7 +7,7 @@ const triangle_vert = @embedFile("triangle.vert");
 const triangle_frag = @embedFile("triangle.frag");
 const Allocator = std.mem.Allocator;
 
-const app_name = "mach-glfw + vulkan-zig = triangle";
+const app_name = "zulkan";
 
 const Vertex = struct {
     const binding_description = vk.VertexInputBindingDescription{
@@ -48,17 +48,21 @@ pub fn main() !void {
     });
     defer sdl.quit();
 
+    var extent = vk.Extent2D{ .width = 1200, .height = 800 };
+
     var window = try sdl.createWindow(
-        "SDL2 Wrapper Demo",
+        app_name,
         .{ .centered = {} },
         .{ .centered = {} },
-        1200,
-        800,
-        .{ .vis = .shown, .context = .vulkan },
+        extent.width,
+        extent.height,
+        .{
+            .vis = .shown,
+            .context = .vulkan,
+            .resizable = true,
+        },
     );
     defer window.destroy();
-
-    var extent = vk.Extent2D{ .width = 800, .height = 600 };
 
     const allocator = std.heap.page_allocator;
 
@@ -127,7 +131,40 @@ pub fn main() !void {
         while (sdl.pollEvent()) |event| {
             switch (event) {
                 sdl.Event.key_down => {
+                    if (event.key_down.keycode == sdl.Keycode.escape) {
+                        running = false;
+                    }
+                },
+                sdl.Event.quit => {
                     running = false;
+                },
+                sdl.Event.window => |window_event| switch (window_event.type) {
+                    .resized => |resize_event| {
+                        const width: u32 = @intCast(resize_event.width);
+                        const height: u32 = @intCast(resize_event.height);
+                        if ((extent.width != width) or (extent.height != height)) {
+                            extent.width = width;
+                            extent.height = height;
+                            std.debug.print("(sdl) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
+                            try swapchain.recreate(extent);
+
+                            destroyFramebuffers(&gc, allocator, framebuffers);
+                            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain);
+
+                            destroyCommandBuffers(&gc, pool, allocator, cmdbufs);
+                            cmdbufs = try createCommandBuffers(
+                                &gc,
+                                pool,
+                                allocator,
+                                buffer,
+                                swapchain.extent,
+                                render_pass,
+                                pipeline,
+                                framebuffers,
+                            );
+                        }
+                    },
+                    else => {},
                 },
                 else => {},
             }
@@ -143,6 +180,7 @@ pub fn main() !void {
             const size = window.getSize();
             extent.width = @intCast(size.width);
             extent.height = @intCast(size.height);
+            std.debug.print("(swap) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
             try swapchain.recreate(extent);
 
             destroyFramebuffers(&gc, allocator, framebuffers);
