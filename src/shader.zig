@@ -45,8 +45,7 @@ pub fn compile(ctx: *const VkContext, allocator: std.mem.Allocator, stage: Stage
         },
     }
 
-    std.debug.print("Shader compiled successfully.\n", .{});
-    std.debug.print("stderr: {s}\n", .{result.stderr});
+    std.debug.print("compiled shader {s}.\n", .{input_file});
 
     return try ctx.vkd.createShaderModule(ctx.dev, &.{
         .code_size = result.stdout.len,

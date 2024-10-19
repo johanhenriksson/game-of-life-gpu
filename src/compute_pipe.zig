@@ -5,6 +5,7 @@ const Shader = @import("shader.zig");
 
 pub const ComputePipe = struct {
     ctx: *const VkContext,
+    module: vk.ShaderModule,
     pipeline: vk.Pipeline,
     pipeline_layout: vk.PipelineLayout,
 
@@ -24,7 +25,7 @@ pub const ComputePipe = struct {
             .p_pool_sizes = &[_]vk.DescriptorPoolSize{
                 .{
                     .type = vk.DescriptorType.sampler,
-                    .descriptor_count = 1,
+                    .descriptor_count = 2,
                 },
             },
         }, null);
@@ -103,6 +104,7 @@ pub const ComputePipe = struct {
 
         return ComputePipe{
             .ctx = ctx,
+            .module = shader,
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
             .descriptor_pool = pool,
@@ -119,6 +121,7 @@ pub const ComputePipe = struct {
         self.ctx.vkd.destroyPipelineLayout(self.ctx.dev, self.pipeline_layout, null);
         self.ctx.vkd.destroyDescriptorPool(self.ctx.dev, self.descriptor_pool, null);
         self.ctx.vkd.destroyDescriptorSetLayout(self.ctx.dev, self.descriptor_set_layout, null);
+        self.ctx.vkd.destroyShaderModule(self.ctx.dev, self.module, null);
 
         for (0..self.buffers.len) |i| {
             self.ctx.vkd.destroyImage(self.ctx.dev, self.buffers[i], null);

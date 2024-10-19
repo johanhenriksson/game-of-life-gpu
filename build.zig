@@ -36,10 +36,6 @@ pub fn build(b: *std.Build) !void {
     sdl_dep.link(exe, .dynamic);
     exe.root_module.addImport("sdl2", sdl_dep.getWrapperModuleVulkan(vkzig_bindings));
 
-    // Compile shaders at build time so that they can be imported with '@embedFile'.
-    try compileShader(b, exe, "triangle.vert");
-    try compileShader(b, exe, "triangle.frag");
-
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
@@ -67,18 +63,4 @@ pub fn build(b: *std.Build) !void {
     // This will evaluate the `run` step rather than the default, which is "install".
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-}
-
-fn compileShader(b: *std.Build, exe: *std.Build.Step.Compile, name: []const u8) !void {
-    const inputPath = try std.fmt.allocPrint(b.allocator, "shaders/{s}", .{name});
-    const outputPath = try std.fmt.allocPrint(b.allocator, "{s}.spv", .{name});
-
-    const glslc = b.addSystemCommand(&.{"glslc"});
-    glslc.addFileArg(b.path(inputPath));
-    glslc.addArgs(&.{ "--target-env=vulkan1.1", "-o" });
-    const spv_file = glslc.addOutputFileArg(outputPath);
-
-    exe.root_module.addAnonymousImport(name, .{
-        .root_source_file = spv_file,
-    });
 }
