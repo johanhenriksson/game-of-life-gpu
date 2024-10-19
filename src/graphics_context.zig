@@ -12,6 +12,7 @@ const required_device_extensions = [_][*:0]const u8{
 const optional_device_extensions = [_][*:0]const u8{};
 
 const optional_instance_extensions = [_][*:0]const u8{
+    vk.extensions.khr_portability_enumeration.name,
     vk.extensions.khr_get_physical_device_properties_2.name,
 };
 

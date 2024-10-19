@@ -78,7 +78,13 @@ pub const Swapchain = struct {
         errdefer gc.vkd.destroySemaphore(gc.dev, next_image_acquired, null);
 
         const result = try gc.vkd.acquireNextImageKHR(gc.dev, handle, std.math.maxInt(u64), next_image_acquired, .null_handle);
+        if (result.result == .suboptimal_khr) {
+            // suboptimal means we try again
+            return initRecycle(gc, allocator, extent, handle);
+        }
         if (result.result != .success) {
+            // other errors are fatal
+            // this will cause later crashes since next_image_acquired will be destroyed multiple times
             return error.ImageAcquireFailed;
         }
 
@@ -106,6 +112,7 @@ pub const Swapchain = struct {
     }
 
     pub fn deinit(self: Swapchain) void {
+        std.debug.print("Deinitializing swapchain\n", .{});
         self.deinitExceptSwapchain();
         self.gc.vkd.destroySwapchainKHR(self.gc.dev, self.handle, null);
     }

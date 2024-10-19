@@ -74,6 +74,8 @@ pub fn main() !void {
     var swapchain = try Swapchain.init(&gc, allocator, extent);
     defer swapchain.deinit();
 
+    std.debug.print("Created swapchain with {d} images\n", .{swapchain.swap_images.len});
+
     const pipeline_layout = try gc.vkd.createPipelineLayout(gc.dev, &.{
         .flags = .{},
         .set_layout_count = 0,
@@ -83,20 +85,30 @@ pub fn main() !void {
     }, null);
     defer gc.vkd.destroyPipelineLayout(gc.dev, pipeline_layout, null);
 
+    std.debug.print("Created pipeline layout\n", .{});
+
     const render_pass = try createRenderPass(&gc, swapchain);
     defer gc.vkd.destroyRenderPass(gc.dev, render_pass, null);
+
+    std.debug.print("Created render pass\n", .{});
 
     const pipeline = try createPipeline(&gc, pipeline_layout, render_pass);
     defer gc.vkd.destroyPipeline(gc.dev, pipeline, null);
 
+    std.debug.print("Created pipeline\n", .{});
+
     var framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain);
     defer destroyFramebuffers(&gc, allocator, framebuffers);
+
+    std.debug.print("Created framebuffers\n", .{});
 
     const pool = try gc.vkd.createCommandPool(gc.dev, &.{
         .flags = .{},
         .queue_family_index = gc.graphics_queue.family,
     }, null);
     defer gc.vkd.destroyCommandPool(gc.dev, pool, null);
+
+    std.debug.print("Created command pool\n", .{});
 
     const buffer = try gc.vkd.createBuffer(gc.dev, &.{
         .flags = .{},
@@ -113,6 +125,8 @@ pub fn main() !void {
     try gc.vkd.bindBufferMemory(gc.dev, buffer, memory, 0);
 
     try uploadVertices(&gc, pool, buffer);
+
+    std.debug.print("Uploaded vertices\n", .{});
 
     var cmdbufs = try createCommandBuffers(
         &gc,
@@ -162,6 +176,7 @@ pub fn main() !void {
                                 pipeline,
                                 framebuffers,
                             );
+                            std.debug.print("(sdl) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
                         }
                     },
                     else => {},
@@ -197,8 +212,11 @@ pub fn main() !void {
                 pipeline,
                 framebuffers,
             );
+
+            std.debug.print("(swap) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
         }
     }
+    std.debug.print("Exiting...\n", .{});
 
     try swapchain.waitForAllFences();
 }
