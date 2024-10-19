@@ -94,6 +94,7 @@ pub fn main() !void {
         buffer,
         swapchain.extent,
         &graphics,
+        &compute,
     );
     defer destroyCommandBuffers(&ctx, pool, allocator, cmdbufs);
 
@@ -128,6 +129,7 @@ pub fn main() !void {
                                 buffer,
                                 swapchain.extent,
                                 &graphics,
+                                &compute,
                             );
                             std.debug.print("(sdl) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
                         }
@@ -137,6 +139,9 @@ pub fn main() !void {
                 else => {},
             }
         }
+
+        compute.next_image(swapchain.image_index);
+
         const cmdbuf = cmdbufs[swapchain.image_index];
 
         const state = swapchain.present(cmdbuf) catch |err| switch (err) {
@@ -160,6 +165,7 @@ pub fn main() !void {
                 buffer,
                 swapchain.extent,
                 &graphics,
+                &compute,
             );
 
             std.debug.print("(swap) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
@@ -241,7 +247,7 @@ fn createCommandBuffers(
     buffer: vk.Buffer,
     extent: vk.Extent2D,
     gfx: *GraphicsPipe,
-    // images: []vk.ImageView,
+    compute: *ComputePipe,
 ) ![]vk.CommandBuffer {
     const cmdbufs = try allocator.alloc(vk.CommandBuffer, gfx.framebuffers.len);
     errdefer allocator.free(cmdbufs);
@@ -279,6 +285,9 @@ fn createCommandBuffers(
 
         // execute compute shader
 
+        ctx.vkd.cmdBindPipeline(cmdbuf, .compute, compute.pipeline);
+        ctx.vkd.cmdDispatch(cmdbuf, 16, 16, 1);
+
         // add a memory barrier to ensure the compute shader is finished before the graphics pipeline starts
 
         ctx.vkd.cmdSetViewport(cmdbuf, 0, 1, @as([*]const vk.Viewport, @ptrCast(&viewport)));
@@ -298,6 +307,27 @@ fn createCommandBuffers(
             .p_clear_values = @as([*]const vk.ClearValue, @ptrCast(&clear)),
         }, .@"inline");
 
+        // this only happens once during creation (its not a buffer command)
+        ctx.vkd.updateDescriptorSets(ctx.dev, 1, &[_]vk.WriteDescriptorSet{
+            .{
+                .dst_set = gfx.descriptors[i],
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = vk.DescriptorType.sampler,
+                .p_image_info = &[_]vk.DescriptorImageInfo{
+                    .{
+                        .sampler = compute.buffer_sampler[i],
+                        .image_view = compute.buffer_views[i],
+                        .image_layout = vk.ImageLayout.general,
+                    },
+                },
+                .p_buffer_info = &[_]vk.DescriptorBufferInfo{},
+                .p_texel_buffer_view = &[_]vk.BufferView{},
+            },
+        }, 0, null);
+
+        ctx.vkd.cmdBindDescriptorSets(cmdbuf, .graphics, gfx.pipeline_layout, 0, 1, @as([*]const vk.DescriptorSet, @ptrCast(&gfx.descriptors[i])), 0, null);
         ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, gfx.pipeline);
         const offset = [_]vk.DeviceSize{0};
         ctx.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @as([*]const vk.Buffer, @ptrCast(&buffer)), &offset);

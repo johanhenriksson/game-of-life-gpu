@@ -56,7 +56,7 @@ pub const GraphicsPipe = struct {
             .p_pool_sizes = &[_]vk.DescriptorPoolSize{
                 .{
                     .type = vk.DescriptorType.sampler,
-                    .descriptor_count = 1,
+                    .descriptor_count = 100,
                 },
             },
         }, null);
@@ -83,7 +83,7 @@ pub const GraphicsPipe = struct {
         }
         try ctx.vkd.allocateDescriptorSets(ctx.dev, &vk.DescriptorSetAllocateInfo{
             .descriptor_pool = pool,
-            .descriptor_set_count = 1,
+            .descriptor_set_count = @intCast(frames),
             .p_set_layouts = @ptrCast(layouts),
         }, @ptrCast(descriptors));
 
@@ -91,7 +91,7 @@ pub const GraphicsPipe = struct {
             .set_layout_count = 1,
             .p_set_layouts = &[_]vk.DescriptorSetLayout{layout},
         }, null);
-        errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.dev, layout, null);
+        errdefer ctx.vkd.destroyPipelineLayout(ctx.dev, pipeline_layout, null);
 
         const render_pass = try createRenderPass(ctx, swapchain);
 
