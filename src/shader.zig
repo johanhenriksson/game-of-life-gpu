@@ -17,7 +17,7 @@ pub fn compile(ctx: *const VkContext, allocator: std.mem.Allocator, stage: Stage
 
     const args = [_][]const u8{
         "glslc",
-        "--target-env=vulkan1.2",
+        "--target-env=vulkan1.1",
         stageFlag,
         "-o",
         "-", // output to stdout

@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const required_device_extensions = [_][*:0]const u8{
     vk.extensions.khr_swapchain.name,
+    vk.extensions.khr_portability_subset.name,
 };
 
 const optional_device_extensions = [_][*:0]const u8{};
@@ -14,6 +15,7 @@ const optional_device_extensions = [_][*:0]const u8{};
 const optional_instance_extensions = [_][*:0]const u8{
     vk.extensions.khr_portability_enumeration.name,
     vk.extensions.khr_get_physical_device_properties_2.name,
+    "VK_LAYER_KHRONOS_validation",
 };
 
 const BaseDispatch = vk.BaseWrapper(&[_]vk.ApiInfo{
@@ -92,6 +94,7 @@ const DeviceDispatch = vk.DeviceWrapper(&[_]vk.ApiInfo{
             .destroyFramebuffer = true,
             .createImage = true,
             .destroyImage = true,
+            .cmdPipelineBarrier = true,
             .getImageMemoryRequirements = true,
             .bindImageMemory = true,
             .createSampler = true,

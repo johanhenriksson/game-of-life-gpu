@@ -13,7 +13,7 @@ pub const ComputePipe = struct {
 
     descriptor_pool: vk.DescriptorPool,
     descriptor_set_layout: vk.DescriptorSetLayout,
-    descriptors: vk.DescriptorSet,
+    descriptors: []vk.DescriptorSet,
 
     extent: vk.Extent2D,
     buffers: []vk.Image,
@@ -25,22 +25,30 @@ pub const ComputePipe = struct {
         const shader = try Shader.compile(ctx, allocator, Shader.Stage.compute, "shaders/hello.glsl");
 
         const pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
-            .max_sets = 1,
+            .max_sets = 3,
             .pool_size_count = 1,
             .p_pool_sizes = &[_]vk.DescriptorPoolSize{
                 .{
-                    .type = vk.DescriptorType.sampler,
+                    .type = vk.DescriptorType.storage_image,
                     .descriptor_count = 100,
                 },
             },
         }, null);
 
         const layout = try ctx.vkd.createDescriptorSetLayout(ctx.dev, &vk.DescriptorSetLayoutCreateInfo{
-            .binding_count = 1,
+            .binding_count = 2,
             .p_bindings = &[_]vk.DescriptorSetLayoutBinding{
                 .{
                     .binding = 0,
-                    .descriptor_type = vk.DescriptorType.sampler,
+                    .descriptor_type = vk.DescriptorType.storage_image,
+                    .descriptor_count = 1,
+                    .stage_flags = .{
+                        .compute_bit = true,
+                    },
+                },
+                .{
+                    .binding = 1,
+                    .descriptor_type = vk.DescriptorType.storage_image,
                     .descriptor_count = 1,
                     .stage_flags = .{
                         .compute_bit = true,
@@ -49,12 +57,13 @@ pub const ComputePipe = struct {
             },
         }, null);
 
-        var descriptor: vk.DescriptorSet = .null_handle;
+        const frames = 3;
+        const descriptors = try allocator.alloc(vk.DescriptorSet, frames);
         try ctx.vkd.allocateDescriptorSets(ctx.dev, &vk.DescriptorSetAllocateInfo{
             .descriptor_pool = pool,
-            .descriptor_set_count = 1,
-            .p_set_layouts = &[_]vk.DescriptorSetLayout{layout},
-        }, @ptrCast(&descriptor));
+            .descriptor_set_count = 3,
+            .p_set_layouts = &[_]vk.DescriptorSetLayout{ layout, layout, layout },
+        }, descriptors.ptr);
 
         const pipeline_layout = try ctx.vkd.createPipelineLayout(ctx.dev, &vk.PipelineLayoutCreateInfo{
             .set_layout_count = 1,
@@ -82,7 +91,6 @@ pub const ComputePipe = struct {
         }
         errdefer ctx.vkd.destroyShaderModule(ctx.dev, shader, null);
 
-        const frames = 3;
         const buffers = try allocator.alloc(vk.Image, frames);
         const buffer_memory = try allocator.alloc(vk.DeviceMemory, frames);
         const buffer_views = try allocator.alloc(vk.ImageView, frames);
@@ -104,9 +112,12 @@ pub const ComputePipe = struct {
                 .tiling = vk.ImageTiling.optimal,
                 .usage = .{
                     .sampled_bit = true,
+                    .transfer_dst_bit = true,
+                    .transfer_src_bit = true,
+                    .storage_bit = true,
                 },
                 .sharing_mode = vk.SharingMode.exclusive,
-                .initial_layout = vk.ImageLayout.general,
+                .initial_layout = vk.ImageLayout.undefined,
             }, null);
             errdefer ctx.vkd.destroyImage(ctx.dev, buffers[i], null);
 
@@ -166,7 +177,7 @@ pub const ComputePipe = struct {
             .pipeline_layout = pipeline_layout,
             .descriptor_pool = pool,
             .descriptor_set_layout = layout,
-            .descriptors = descriptor,
+            .descriptors = descriptors,
 
             .extent = extent,
             .buffers = buffers,
@@ -200,17 +211,30 @@ pub const ComputePipe = struct {
         const prev = if (frame > 0) frame - 1 else self.buffers.len - 1;
         self.ctx.vkd.updateDescriptorSets(self.ctx.dev, 1, &[_]vk.WriteDescriptorSet{
             .{
-                .dst_set = self.descriptors,
+                .dst_set = self.descriptors[frame],
                 .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
-                .descriptor_type = vk.DescriptorType.sampler,
+                .descriptor_type = vk.DescriptorType.storage_image,
                 .p_image_info = &[_]vk.DescriptorImageInfo{
                     .{
                         .sampler = self.buffer_sampler[frame],
                         .image_view = self.buffer_views[frame],
                         .image_layout = vk.ImageLayout.general,
                     },
+                },
+                .p_buffer_info = &[_]vk.DescriptorBufferInfo{},
+                .p_texel_buffer_view = &[_]vk.BufferView{},
+            },
+        }, 0, null);
+        self.ctx.vkd.updateDescriptorSets(self.ctx.dev, 1, &[_]vk.WriteDescriptorSet{
+            .{
+                .dst_set = self.descriptors[frame],
+                .dst_binding = 1,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = vk.DescriptorType.storage_image,
+                .p_image_info = &[_]vk.DescriptorImageInfo{
                     .{
                         .sampler = self.buffer_sampler[prev],
                         .image_view = self.buffer_views[prev],

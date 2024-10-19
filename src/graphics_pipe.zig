@@ -55,7 +55,7 @@ pub const GraphicsPipe = struct {
             .pool_size_count = 1,
             .p_pool_sizes = &[_]vk.DescriptorPoolSize{
                 .{
-                    .type = vk.DescriptorType.sampler,
+                    .type = vk.DescriptorType.combined_image_sampler,
                     .descriptor_count = 100,
                 },
             },
@@ -66,10 +66,10 @@ pub const GraphicsPipe = struct {
             .p_bindings = &[_]vk.DescriptorSetLayoutBinding{
                 .{
                     .binding = 0,
-                    .descriptor_type = vk.DescriptorType.sampler,
+                    .descriptor_type = vk.DescriptorType.combined_image_sampler,
                     .descriptor_count = 1,
                     .stage_flags = .{
-                        .compute_bit = true,
+                        .fragment_bit = true,
                     },
                 },
             },
@@ -84,8 +84,8 @@ pub const GraphicsPipe = struct {
         try ctx.vkd.allocateDescriptorSets(ctx.dev, &vk.DescriptorSetAllocateInfo{
             .descriptor_pool = pool,
             .descriptor_set_count = @intCast(frames),
-            .p_set_layouts = @ptrCast(layouts),
-        }, @ptrCast(descriptors));
+            .p_set_layouts = layouts.ptr,
+        }, descriptors.ptr);
 
         const pipeline_layout = try ctx.vkd.createPipelineLayout(ctx.dev, &vk.PipelineLayoutCreateInfo{
             .set_layout_count = 1,
