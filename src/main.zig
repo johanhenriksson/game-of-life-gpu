@@ -26,19 +26,22 @@ const Vertex = struct {
         .{
             .binding = 0,
             .location = 1,
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "color"),
+            .format = .r32g32_sfloat,
+            .offset = @offsetOf(Vertex, "uv"),
         },
     };
 
     pos: [2]f32,
-    color: [3]f32,
+    uv: [2]f32,
 };
 
 const vertices = [_]Vertex{
-    .{ .pos = .{ 0, -0.5 }, .color = .{ 1, 0, 0 } },
-    .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0, 1, 0 } },
-    .{ .pos = .{ -0.5, 0.5 }, .color = .{ 0, 0, 1 } },
+    .{ .pos = .{ -0.5, -0.5 }, .uv = .{ 0, 0 } }, // top left
+    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 } }, // bottom right
+    .{ .pos = .{ -0.5, 0.5 }, .uv = .{ 1, 0 } }, // bottom left
+    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 } }, // bottom right
+    .{ .pos = .{ -0.5, -0.5 }, .uv = .{ 0, 0 } }, // top left
+    .{ .pos = .{ 0.5, -0.5 }, .uv = .{ 0, 1 } }, // top right
 };
 
 pub fn main() !void {
