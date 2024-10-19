@@ -1,6 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl2");
 const vk = @import("vulkan");
+const ComputePipe = @import("compute_pipe.zig").ComputePipe;
 const VkContext = @import("context.zig").VkContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const triangle_vert = @embedFile("triangle.vert");
@@ -36,12 +37,12 @@ const Vertex = struct {
 };
 
 const vertices = [_]Vertex{
-    .{ .pos = .{ -0.5, -0.5 }, .uv = .{ 0, 0 } }, // top left
-    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 } }, // bottom right
-    .{ .pos = .{ -0.5, 0.5 }, .uv = .{ 1, 0 } }, // bottom left
-    .{ .pos = .{ 0.5, 0.5 }, .uv = .{ 1, 1 } }, // bottom right
-    .{ .pos = .{ -0.5, -0.5 }, .uv = .{ 0, 0 } }, // top left
-    .{ .pos = .{ 0.5, -0.5 }, .uv = .{ 0, 1 } }, // top right
+    .{ .pos = .{ -1, -1 }, .uv = .{ 0, 0 } }, // top left
+    .{ .pos = .{ 1, 1 }, .uv = .{ 1, 1 } }, // bottom right
+    .{ .pos = .{ -1, 1 }, .uv = .{ 1, 0 } }, // bottom left
+    .{ .pos = .{ 1, 1 }, .uv = .{ 1, 1 } }, // bottom right
+    .{ .pos = .{ -1, -1 }, .uv = .{ 0, 0 } }, // top left
+    .{ .pos = .{ 1, -1 }, .uv = .{ 0, 1 } }, // top right
 };
 
 pub fn main() !void {
@@ -130,6 +131,12 @@ pub fn main() !void {
     try uploadVertices(&ctx, pool, buffer);
 
     std.debug.print("Uploaded vertices\n", .{});
+
+    var compute = try ComputePipe.init(&ctx, allocator, vk.Extent2D{
+        .width = 32,
+        .height = 32,
+    });
+    defer compute.deinit();
 
     var cmdbufs = try createCommandBuffers(
         &ctx,
@@ -289,7 +296,7 @@ fn copyBuffer(gc: *const VkContext, pool: vk.CommandPool, dst: vk.Buffer, src: v
 }
 
 fn createCommandBuffers(
-    gc: *const VkContext,
+    ctx: *const VkContext,
     pool: vk.CommandPool,
     allocator: Allocator,
     buffer: vk.Buffer,
@@ -297,16 +304,17 @@ fn createCommandBuffers(
     render_pass: vk.RenderPass,
     pipeline: vk.Pipeline,
     framebuffers: []vk.Framebuffer,
+    // images: []vk.ImageView,
 ) ![]vk.CommandBuffer {
     const cmdbufs = try allocator.alloc(vk.CommandBuffer, framebuffers.len);
     errdefer allocator.free(cmdbufs);
 
-    try gc.vkd.allocateCommandBuffers(gc.dev, &vk.CommandBufferAllocateInfo{
+    try ctx.vkd.allocateCommandBuffers(ctx.dev, &vk.CommandBufferAllocateInfo{
         .command_pool = pool,
         .level = .primary,
         .command_buffer_count = @truncate(cmdbufs.len),
     }, cmdbufs.ptr);
-    errdefer gc.vkd.freeCommandBuffers(gc.dev, pool, @truncate(cmdbufs.len), cmdbufs.ptr);
+    errdefer ctx.vkd.freeCommandBuffers(ctx.dev, pool, @truncate(cmdbufs.len), cmdbufs.ptr);
 
     const clear = vk.ClearValue{
         .color = .{ .float_32 = .{ 0, 0, 0, 1 } },
@@ -327,13 +335,17 @@ fn createCommandBuffers(
     };
 
     for (cmdbufs, 0..) |cmdbuf, i| {
-        try gc.vkd.beginCommandBuffer(cmdbuf, &.{
+        try ctx.vkd.beginCommandBuffer(cmdbuf, &.{
             .flags = .{},
             .p_inheritance_info = null,
         });
 
-        gc.vkd.cmdSetViewport(cmdbuf, 0, 1, @as([*]const vk.Viewport, @ptrCast(&viewport)));
-        gc.vkd.cmdSetScissor(cmdbuf, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor)));
+        // execute compute shader
+
+        // add a memory barrier to ensure the compute shader is finished before the graphics pipeline starts
+
+        ctx.vkd.cmdSetViewport(cmdbuf, 0, 1, @as([*]const vk.Viewport, @ptrCast(&viewport)));
+        ctx.vkd.cmdSetScissor(cmdbuf, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor)));
 
         // This needs to be a separate definition - see https://github.com/ziglang/zig/issues/7627.
         const render_area = vk.Rect2D{
@@ -341,7 +353,7 @@ fn createCommandBuffers(
             .extent = extent,
         };
 
-        gc.vkd.cmdBeginRenderPass(cmdbuf, &.{
+        ctx.vkd.cmdBeginRenderPass(cmdbuf, &.{
             .render_pass = render_pass,
             .framebuffer = framebuffers[i],
             .render_area = render_area,
@@ -349,13 +361,13 @@ fn createCommandBuffers(
             .p_clear_values = @as([*]const vk.ClearValue, @ptrCast(&clear)),
         }, .@"inline");
 
-        gc.vkd.cmdBindPipeline(cmdbuf, .graphics, pipeline);
+        ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, pipeline);
         const offset = [_]vk.DeviceSize{0};
-        gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @as([*]const vk.Buffer, @ptrCast(&buffer)), &offset);
-        gc.vkd.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
+        ctx.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @as([*]const vk.Buffer, @ptrCast(&buffer)), &offset);
+        ctx.vkd.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
 
-        gc.vkd.cmdEndRenderPass(cmdbuf);
-        try gc.vkd.endCommandBuffer(cmdbuf);
+        ctx.vkd.cmdEndRenderPass(cmdbuf);
+        try ctx.vkd.endCommandBuffer(cmdbuf);
     }
 
     return cmdbufs;
