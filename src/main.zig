@@ -1,7 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl2");
 const vk = @import("vulkan");
-const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
+const VkContext = @import("context.zig").VkContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const triangle_vert = @embedFile("triangle.vert");
 const triangle_frag = @embedFile("triangle.frag");
@@ -66,51 +66,51 @@ pub fn main() !void {
 
     const allocator = std.heap.page_allocator;
 
-    const gc = try GraphicsContext.init(allocator, app_name, window);
-    defer gc.deinit();
+    const ctx = try VkContext.init(allocator, app_name, window);
+    defer ctx.deinit();
 
-    std.debug.print("Using device: {?s}\n", .{gc.props.device_name});
+    std.debug.print("Using device: {?s}\n", .{ctx.props.device_name});
 
-    var swapchain = try Swapchain.init(&gc, allocator, extent);
+    var swapchain = try Swapchain.init(&ctx, allocator, extent);
     defer swapchain.deinit();
 
     std.debug.print("Created swapchain with {d} images\n", .{swapchain.swap_images.len});
 
-    const pipeline_layout = try gc.vkd.createPipelineLayout(gc.dev, &.{
+    const pipeline_layout = try ctx.vkd.createPipelineLayout(ctx.dev, &.{
         .flags = .{},
         .set_layout_count = 0,
         .p_set_layouts = undefined,
         .push_constant_range_count = 0,
         .p_push_constant_ranges = undefined,
     }, null);
-    defer gc.vkd.destroyPipelineLayout(gc.dev, pipeline_layout, null);
+    defer ctx.vkd.destroyPipelineLayout(ctx.dev, pipeline_layout, null);
 
     std.debug.print("Created pipeline layout\n", .{});
 
-    const render_pass = try createRenderPass(&gc, swapchain);
-    defer gc.vkd.destroyRenderPass(gc.dev, render_pass, null);
+    const render_pass = try createRenderPass(&ctx, swapchain);
+    defer ctx.vkd.destroyRenderPass(ctx.dev, render_pass, null);
 
     std.debug.print("Created render pass\n", .{});
 
-    const pipeline = try createPipeline(&gc, pipeline_layout, render_pass);
-    defer gc.vkd.destroyPipeline(gc.dev, pipeline, null);
+    const pipeline = try createPipeline(&ctx, pipeline_layout, render_pass);
+    defer ctx.vkd.destroyPipeline(ctx.dev, pipeline, null);
 
     std.debug.print("Created pipeline\n", .{});
 
-    var framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain);
-    defer destroyFramebuffers(&gc, allocator, framebuffers);
+    var framebuffers = try createFramebuffers(&ctx, allocator, render_pass, swapchain);
+    defer destroyFramebuffers(&ctx, allocator, framebuffers);
 
     std.debug.print("Created framebuffers\n", .{});
 
-    const pool = try gc.vkd.createCommandPool(gc.dev, &.{
+    const pool = try ctx.vkd.createCommandPool(ctx.dev, &.{
         .flags = .{},
-        .queue_family_index = gc.graphics_queue.family,
+        .queue_family_index = ctx.graphics_queue.family,
     }, null);
-    defer gc.vkd.destroyCommandPool(gc.dev, pool, null);
+    defer ctx.vkd.destroyCommandPool(ctx.dev, pool, null);
 
     std.debug.print("Created command pool\n", .{});
 
-    const buffer = try gc.vkd.createBuffer(gc.dev, &.{
+    const buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
         .flags = .{},
         .size = @sizeOf(@TypeOf(vertices)),
         .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
@@ -118,18 +118,18 @@ pub fn main() !void {
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
     }, null);
-    defer gc.vkd.destroyBuffer(gc.dev, buffer, null);
-    const mem_reqs = gc.vkd.getBufferMemoryRequirements(gc.dev, buffer);
-    const memory = try gc.allocate(mem_reqs, .{ .device_local_bit = true });
-    defer gc.vkd.freeMemory(gc.dev, memory, null);
-    try gc.vkd.bindBufferMemory(gc.dev, buffer, memory, 0);
+    defer ctx.vkd.destroyBuffer(ctx.dev, buffer, null);
+    const mem_reqs = ctx.vkd.getBufferMemoryRequirements(ctx.dev, buffer);
+    const memory = try ctx.allocate(mem_reqs, .{ .device_local_bit = true });
+    defer ctx.vkd.freeMemory(ctx.dev, memory, null);
+    try ctx.vkd.bindBufferMemory(ctx.dev, buffer, memory, 0);
 
-    try uploadVertices(&gc, pool, buffer);
+    try uploadVertices(&ctx, pool, buffer);
 
     std.debug.print("Uploaded vertices\n", .{});
 
     var cmdbufs = try createCommandBuffers(
-        &gc,
+        &ctx,
         pool,
         allocator,
         buffer,
@@ -138,7 +138,7 @@ pub fn main() !void {
         pipeline,
         framebuffers,
     );
-    defer destroyCommandBuffers(&gc, pool, allocator, cmdbufs);
+    defer destroyCommandBuffers(&ctx, pool, allocator, cmdbufs);
 
     var running = true;
     while (running) {
@@ -162,12 +162,12 @@ pub fn main() !void {
                             std.debug.print("(sdl) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
                             try swapchain.recreate(extent);
 
-                            destroyFramebuffers(&gc, allocator, framebuffers);
-                            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain);
+                            destroyFramebuffers(&ctx, allocator, framebuffers);
+                            framebuffers = try createFramebuffers(&ctx, allocator, render_pass, swapchain);
 
-                            destroyCommandBuffers(&gc, pool, allocator, cmdbufs);
+                            destroyCommandBuffers(&ctx, pool, allocator, cmdbufs);
                             cmdbufs = try createCommandBuffers(
-                                &gc,
+                                &ctx,
                                 pool,
                                 allocator,
                                 buffer,
@@ -198,12 +198,12 @@ pub fn main() !void {
             std.debug.print("(swap) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
             try swapchain.recreate(extent);
 
-            destroyFramebuffers(&gc, allocator, framebuffers);
-            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain);
+            destroyFramebuffers(&ctx, allocator, framebuffers);
+            framebuffers = try createFramebuffers(&ctx, allocator, render_pass, swapchain);
 
-            destroyCommandBuffers(&gc, pool, allocator, cmdbufs);
+            destroyCommandBuffers(&ctx, pool, allocator, cmdbufs);
             cmdbufs = try createCommandBuffers(
-                &gc,
+                &ctx,
                 pool,
                 allocator,
                 buffer,
@@ -221,7 +221,7 @@ pub fn main() !void {
     try swapchain.waitForAllFences();
 }
 
-fn uploadVertices(gc: *const GraphicsContext, pool: vk.CommandPool, buffer: vk.Buffer) !void {
+fn uploadVertices(gc: *const VkContext, pool: vk.CommandPool, buffer: vk.Buffer) !void {
     const staging_buffer = try gc.vkd.createBuffer(gc.dev, &.{
         .flags = .{},
         .size = @sizeOf(@TypeOf(vertices)),
@@ -249,7 +249,7 @@ fn uploadVertices(gc: *const GraphicsContext, pool: vk.CommandPool, buffer: vk.B
     try copyBuffer(gc, pool, buffer, staging_buffer, @sizeOf(@TypeOf(vertices)));
 }
 
-fn copyBuffer(gc: *const GraphicsContext, pool: vk.CommandPool, dst: vk.Buffer, src: vk.Buffer, size: vk.DeviceSize) !void {
+fn copyBuffer(gc: *const VkContext, pool: vk.CommandPool, dst: vk.Buffer, src: vk.Buffer, size: vk.DeviceSize) !void {
     var cmdbuf: vk.CommandBuffer = undefined;
     try gc.vkd.allocateCommandBuffers(gc.dev, &.{
         .command_pool = pool,
@@ -286,7 +286,7 @@ fn copyBuffer(gc: *const GraphicsContext, pool: vk.CommandPool, dst: vk.Buffer, 
 }
 
 fn createCommandBuffers(
-    gc: *const GraphicsContext,
+    gc: *const VkContext,
     pool: vk.CommandPool,
     allocator: Allocator,
     buffer: vk.Buffer,
@@ -358,12 +358,12 @@ fn createCommandBuffers(
     return cmdbufs;
 }
 
-fn destroyCommandBuffers(gc: *const GraphicsContext, pool: vk.CommandPool, allocator: Allocator, cmdbufs: []vk.CommandBuffer) void {
+fn destroyCommandBuffers(gc: *const VkContext, pool: vk.CommandPool, allocator: Allocator, cmdbufs: []vk.CommandBuffer) void {
     gc.vkd.freeCommandBuffers(gc.dev, pool, @truncate(cmdbufs.len), cmdbufs.ptr);
     allocator.free(cmdbufs);
 }
 
-fn createFramebuffers(gc: *const GraphicsContext, allocator: Allocator, render_pass: vk.RenderPass, swapchain: Swapchain) ![]vk.Framebuffer {
+fn createFramebuffers(gc: *const VkContext, allocator: Allocator, render_pass: vk.RenderPass, swapchain: Swapchain) ![]vk.Framebuffer {
     const framebuffers = try allocator.alloc(vk.Framebuffer, swapchain.swap_images.len);
     errdefer allocator.free(framebuffers);
 
@@ -386,12 +386,12 @@ fn createFramebuffers(gc: *const GraphicsContext, allocator: Allocator, render_p
     return framebuffers;
 }
 
-fn destroyFramebuffers(gc: *const GraphicsContext, allocator: Allocator, framebuffers: []const vk.Framebuffer) void {
+fn destroyFramebuffers(gc: *const VkContext, allocator: Allocator, framebuffers: []const vk.Framebuffer) void {
     for (framebuffers) |fb| gc.vkd.destroyFramebuffer(gc.dev, fb, null);
     allocator.free(framebuffers);
 }
 
-fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain) !vk.RenderPass {
+fn createRenderPass(gc: *const VkContext, swapchain: Swapchain) !vk.RenderPass {
     const color_attachment = vk.AttachmentDescription{
         .flags = .{},
         .format = swapchain.surface_format.format,
@@ -434,7 +434,7 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain) !vk.Render
 }
 
 fn createPipeline(
-    gc: *const GraphicsContext,
+    gc: *const VkContext,
     layout: vk.PipelineLayout,
     render_pass: vk.RenderPass,
 ) !vk.Pipeline {

@@ -104,7 +104,7 @@ const DeviceDispatch = vk.DeviceWrapper(&[_]vk.ApiInfo{
     },
 });
 
-pub const GraphicsContext = struct {
+pub const VkContext = struct {
     vkb: BaseDispatch,
     vki: InstanceDispatch,
     vkd: DeviceDispatch,
@@ -119,8 +119,8 @@ pub const GraphicsContext = struct {
     graphics_queue: Queue,
     present_queue: Queue,
 
-    pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: sdl.Window) !GraphicsContext {
-        var self: GraphicsContext = undefined;
+    pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: sdl.Window) !VkContext {
+        var self: VkContext = undefined;
         const procAddr = try sdl.vulkan.getVkGetInstanceProcAddr();
         self.vkb = try BaseDispatch.load(procAddr);
 
@@ -189,18 +189,18 @@ pub const GraphicsContext = struct {
         return self;
     }
 
-    pub fn deinit(self: GraphicsContext) void {
+    pub fn deinit(self: VkContext) void {
         self.vkd.destroyDevice(self.dev, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vki.destroyInstance(self.instance, null);
     }
 
-    pub fn deviceName(self: GraphicsContext) []const u8 {
+    pub fn deviceName(self: VkContext) []const u8 {
         const len = std.mem.indexOfScalar(u8, &self.props.device_name, 0).?;
         return self.props.device_name[0..len];
     }
 
-    pub fn findMemoryTypeIndex(self: GraphicsContext, memory_type_bits: u32, flags: vk.MemoryPropertyFlags) !u32 {
+    pub fn findMemoryTypeIndex(self: VkContext, memory_type_bits: u32, flags: vk.MemoryPropertyFlags) !u32 {
         for (self.mem_props.memory_types[0..self.mem_props.memory_type_count], 0..) |mem_type, i| {
             if (memory_type_bits & (@as(u32, 1) << @as(u5, @truncate(i))) != 0 and mem_type.property_flags.contains(flags)) {
                 return @as(u32, @truncate(i));
@@ -210,7 +210,7 @@ pub const GraphicsContext = struct {
         return error.NoSuitableMemoryType;
     }
 
-    pub fn allocate(self: GraphicsContext, requirements: vk.MemoryRequirements, flags: vk.MemoryPropertyFlags) !vk.DeviceMemory {
+    pub fn allocate(self: VkContext, requirements: vk.MemoryRequirements, flags: vk.MemoryPropertyFlags) !vk.DeviceMemory {
         return try self.vkd.allocateMemory(self.dev, &.{
             .allocation_size = requirements.size,
             .memory_type_index = try self.findMemoryTypeIndex(requirements.memory_type_bits, flags),
