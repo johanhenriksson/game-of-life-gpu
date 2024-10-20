@@ -17,8 +17,8 @@ void main() {
     ivec2 cell = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 size = imageSize(next);
 
-    vec4 self = imageLoad(prev, cell);
-    bool was_alive = cell_alive(self);
+    vec4 color = imageLoad(prev, cell);
+    bool was_alive = cell_alive(color);
 
     int neighbors = 0;
     if (was_alive) {
@@ -50,9 +50,18 @@ void main() {
         } 
     }
 
-    vec4 color = vec4(0,0,0,1);
+    color.x = 0;
+    color.y *= 0.9;
+    color.z *= 0.9;
+    if (color.y < 0.01) {
+        color.y = 0;
+    }
+    if (color.z < 0.01) {
+        color.z = 0;
+    }
+
     if (alive) {
-        color = vec4(1);
+        color=vec4(1);
     }
     imageStore(next, cell, color); 
 }
