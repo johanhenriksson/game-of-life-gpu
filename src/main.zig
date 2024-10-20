@@ -105,7 +105,6 @@ pub fn main() !void {
 
     const test_image_ptr = try ctx.vkd.mapMemory(ctx.dev, test_memory, 0, vk.WHOLE_SIZE, .{});
     defer ctx.vkd.unmapMemory(ctx.dev, test_memory);
-
     const test_image_data = try createTestImage(allocator, compute.extent);
     const test_image_colors: [*]Color = @ptrCast(@alignCast(test_image_ptr));
     for (test_image_data, 0..) |color, i| {
@@ -189,7 +188,6 @@ pub fn main() !void {
             },
         }, 0, null);
     }
-    compute.next_image(0);
 
     var cmdbufs = try createCommandBuffers(
         &ctx,
@@ -246,32 +244,8 @@ pub fn main() !void {
         }
 
         const frame = swapchain.image_index;
-        ctx.vkd.updateDescriptorSets(ctx.dev, 1, &[_]vk.WriteDescriptorSet{
-            .{
-                .dst_set = graphics.descriptors[frame],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = vk.DescriptorType.combined_image_sampler,
-                .p_image_info = &[_]vk.DescriptorImageInfo{
-                    .{
-                        .sampler = compute.buffer_sampler[frame],
-                        .image_view = compute.buffer_views[frame],
-                        .image_layout = vk.ImageLayout.general,
-                    },
-                },
-                .p_buffer_info = &[_]vk.DescriptorBufferInfo{},
-                .p_texel_buffer_view = &[_]vk.BufferView{},
-            },
-        }, 0, null);
-        std.debug.print("updated graphics[{}]\n", .{frame});
-
-        compute.next_image(frame);
-        std.debug.print("updated compute[{}]\n", .{frame});
-
         const cmdbuf = cmdbufs[frame];
 
-        std.debug.print("submit frame {d}\n", .{frame});
         const state = swapchain.present(cmdbuf) catch |err| switch (err) {
             error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
             else => |narrow| return narrow,
@@ -413,11 +387,41 @@ fn createCommandBuffers(
 
         // execute compute shader
 
-        ctx.vkd.cmdBindDescriptorSets(cmdbuf, .compute, compute.pipeline_layout, 0, 1, compute.descriptors.ptr, 0, null);
+        ctx.vkd.cmdBindDescriptorSets(cmdbuf, .compute, compute.pipeline_layout, 0, 1, @ptrCast(&compute.descriptors[i]), 0, null);
         ctx.vkd.cmdBindPipeline(cmdbuf, .compute, compute.pipeline);
         ctx.vkd.cmdDispatch(cmdbuf, 16, 16, 1);
 
         // add a memory barrier to ensure the compute shader is finished before the graphics pipeline starts
+        // compute shader (write) must finish before the fragment shader runs (read)
+        ctx.vkd.cmdPipelineBarrier(
+            cmdbuf,
+            .{ .compute_shader_bit = true },
+            .{ .fragment_shader_bit = true },
+            .{},
+            0,
+            null,
+            0,
+            null,
+            1,
+            &[_]vk.ImageMemoryBarrier{
+                .{
+                    .image = compute.buffers[i],
+                    .src_access_mask = .{ .shader_write_bit = true },
+                    .dst_access_mask = .{ .shader_read_bit = true },
+                    .old_layout = vk.ImageLayout.general,
+                    .new_layout = vk.ImageLayout.general,
+                    .src_queue_family_index = ctx.graphics_queue.family,
+                    .dst_queue_family_index = ctx.graphics_queue.family,
+                    .subresource_range = vk.ImageSubresourceRange{
+                        .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
+                        .base_mip_level = 0,
+                        .level_count = 1,
+                        .base_array_layer = 0,
+                        .layer_count = 1,
+                    },
+                },
+            },
+        );
 
         ctx.vkd.cmdSetViewport(cmdbuf, 0, 1, @as([*]const vk.Viewport, @ptrCast(&viewport)));
         ctx.vkd.cmdSetScissor(cmdbuf, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor)));

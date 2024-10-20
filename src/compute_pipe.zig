@@ -23,9 +23,10 @@ pub const ComputePipe = struct {
 
     pub fn init(ctx: *const VkContext, allocator: std.mem.Allocator, extent: vk.Extent2D) !ComputePipe {
         const shader = try Shader.compile(ctx, allocator, Shader.Stage.compute, "shaders/hello.glsl");
+        const frames = 3;
 
         const pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
-            .max_sets = 3,
+            .max_sets = @intCast(frames),
             .pool_size_count = 1,
             .p_pool_sizes = &[_]vk.DescriptorPoolSize{
                 .{
@@ -57,11 +58,10 @@ pub const ComputePipe = struct {
             },
         }, null);
 
-        const frames = 3;
         const descriptors = try allocator.alloc(vk.DescriptorSet, frames);
         try ctx.vkd.allocateDescriptorSets(ctx.dev, &vk.DescriptorSetAllocateInfo{
             .descriptor_pool = pool,
-            .descriptor_set_count = 3,
+            .descriptor_set_count = @intCast(descriptors.len),
             .p_set_layouts = &[_]vk.DescriptorSetLayout{ layout, layout, layout },
         }, descriptors.ptr);
 
@@ -168,7 +168,7 @@ pub const ComputePipe = struct {
             }, null);
         }
 
-        return ComputePipe{
+        var cpipe = ComputePipe{
             .ctx = ctx,
             .allocator = allocator,
 
@@ -185,6 +185,13 @@ pub const ComputePipe = struct {
             .buffer_views = buffer_views,
             .buffer_sampler = buffer_sampler,
         };
+
+        // set up descriptors
+        for (0..frames) |i| {
+            cpipe.next_image(i);
+        }
+
+        return cpipe;
     }
 
     pub fn deinit(self: *ComputePipe) void {
@@ -207,8 +214,9 @@ pub const ComputePipe = struct {
         self.allocator.free(self.buffer_memory);
     }
 
-    pub fn next_image(self: *ComputePipe, frame: usize) void {
+    fn next_image(self: *ComputePipe, frame: usize) void {
         const prev = if (frame > 0) frame - 1 else self.buffers.len - 1;
+
         self.ctx.vkd.updateDescriptorSets(self.ctx.dev, 1, &[_]vk.WriteDescriptorSet{
             .{
                 .dst_set = self.descriptors[frame],
