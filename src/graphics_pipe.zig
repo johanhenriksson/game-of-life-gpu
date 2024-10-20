@@ -3,31 +3,14 @@ const vk = @import("vulkan");
 const VkContext = @import("context.zig").VkContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Shader = @import("shader.zig");
+const Vec2 = @import("primitives.zig").Vec2;
 
-pub const Vertex = struct {
-    const binding_description = vk.VertexInputBindingDescription{
-        .binding = 0,
-        .stride = @sizeOf(Vertex),
-        .input_rate = .vertex,
-    };
+const zm = @import("zmath");
 
-    const attribute_description = [_]vk.VertexInputAttributeDescription{
-        .{
-            .binding = 0,
-            .location = 0,
-            .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "pos"),
-        },
-        .{
-            .binding = 0,
-            .location = 1,
-            .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "uv"),
-        },
-    };
-
-    pos: [2]f32,
-    uv: [2]f32,
+pub const GraphicsArgs = struct {
+    proj: zm.Mat,
+    model: zm.Mat,
+    size: Vec2,
 };
 
 pub const GraphicsPipe = struct {
@@ -47,8 +30,8 @@ pub const GraphicsPipe = struct {
 
     pub fn init(ctx: *const VkContext, swapchain: *Swapchain, allocator: std.mem.Allocator) !GraphicsPipe {
         const frames = swapchain.swap_images.len;
-        const vertex = try Shader.compile(ctx, allocator, Shader.Stage.vertex, "shaders/triangle.vert");
-        const fragment = try Shader.compile(ctx, allocator, Shader.Stage.fragment, "shaders/triangle.frag");
+        const vertex = try Shader.compile(ctx, allocator, Shader.Stage.vertex, "shaders/viewport.vs.glsl");
+        const fragment = try Shader.compile(ctx, allocator, Shader.Stage.fragment, "shaders/viewport.fs.glsl");
 
         const pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
             .max_sets = @intCast(frames),
@@ -87,9 +70,18 @@ pub const GraphicsPipe = struct {
             .p_set_layouts = layouts.ptr,
         }, descriptors.ptr);
 
+        const pushConstantRange = vk.PushConstantRange{
+            .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
+            .offset = 0,
+            .size = @sizeOf(GraphicsArgs),
+        };
+
         const pipeline_layout = try ctx.vkd.createPipelineLayout(ctx.dev, &vk.PipelineLayoutCreateInfo{
             .set_layout_count = 1,
             .p_set_layouts = &[_]vk.DescriptorSetLayout{layout},
+
+            .push_constant_range_count = 1,
+            .p_push_constant_ranges = &[_]vk.PushConstantRange{pushConstantRange},
         }, null);
         errdefer ctx.vkd.destroyPipelineLayout(ctx.dev, pipeline_layout, null);
 
@@ -240,10 +232,10 @@ fn createPipeline(
 
     const pvisci = vk.PipelineVertexInputStateCreateInfo{
         .flags = .{},
-        .vertex_binding_description_count = 1,
-        .p_vertex_binding_descriptions = @as([*]const vk.VertexInputBindingDescription, @ptrCast(&Vertex.binding_description)),
-        .vertex_attribute_description_count = Vertex.attribute_description.len,
-        .p_vertex_attribute_descriptions = &Vertex.attribute_description,
+        .vertex_binding_description_count = 0,
+        .p_vertex_binding_descriptions = null,
+        .vertex_attribute_description_count = 0,
+        .p_vertex_attribute_descriptions = null,
     };
 
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{

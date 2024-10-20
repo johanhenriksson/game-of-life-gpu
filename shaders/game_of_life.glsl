@@ -9,12 +9,16 @@ layout(push_constant) uniform PushConstants {
     int enabled;
 } pushConstants;
 
+bool cell_alive(vec4 cell) {
+    return cell.x > 0.5;
+}
+
 void main() {
     ivec2 cell = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 size = imageSize(next);
 
     vec4 self = imageLoad(prev, cell);
-    bool was_alive = self.x > 0.0;
+    bool was_alive = cell_alive(self);
 
     int neighbors = 0;
     if (was_alive) {
@@ -25,7 +29,7 @@ void main() {
             ivec2 neighbor = cell + ivec2(x, y);
             if(neighbor.x >= 0 && neighbor.x < size.x && neighbor.y >= 0 && neighbor.y < size.y) {
                 vec4 current = imageLoad(prev, neighbor);
-                if(current.x > 0.0) {
+                if(cell_alive(current)) {
                     neighbors++;
                 }
             }
@@ -46,7 +50,7 @@ void main() {
         } 
     }
 
-    vec4 color = vec4(0);
+    vec4 color = vec4(0,0,0,1);
     if (alive) {
         color = vec4(1);
     }

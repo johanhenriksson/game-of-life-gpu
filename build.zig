@@ -36,6 +36,10 @@ pub fn build(b: *std.Build) !void {
     sdl_dep.link(exe, .dynamic);
     exe.root_module.addImport("sdl2", sdl_dep.getWrapperModuleVulkan(vkzig_bindings));
 
+    // zmath
+    const zmath = b.dependency("zmath", .{});
+    exe.root_module.addImport("zmath", zmath.module("root"));
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).

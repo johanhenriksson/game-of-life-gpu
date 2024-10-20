@@ -15,6 +15,7 @@
             .url = "https://github.com/ikskuh/SDL.zig/archive/676bfe080b683fdb9fb15e6e19a80b162b5ae3ca.tar.gz",
             .hash = "122038b9b453ff147ae669153df58e110844f249376f461581c26f85753d5764ef4d",
         },
+        .zmath = .{ .path = "libs/zmath" },
     },
     .paths = .{
         "",

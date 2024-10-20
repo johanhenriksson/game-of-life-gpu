@@ -5,38 +5,22 @@ const Vertex = @import("graphics_pipe.zig").Vertex;
 const ComputePipe = @import("compute_pipe.zig").ComputePipe;
 const ComputeArgs = @import("compute_pipe.zig").PushConstants;
 const GraphicsPipe = @import("graphics_pipe.zig").GraphicsPipe;
+const GraphicsArgs = @import("graphics_pipe.zig").GraphicsArgs;
 const VkContext = @import("context.zig").VkContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Allocator = std.mem.Allocator;
+const Viewport = @import("viewport.zig").Viewport;
+
+const zm = @import("zmath");
+const Vec2 = @import("primitives.zig").Vec2;
+const Rect = @import("primitives.zig").Rect;
+const Color = @import("primitives.zig").Color;
+const transitionImages = @import("helper.zig").transitionImages;
+const copyBuffer = @import("helper.zig").copyBuffer;
+
+const Cursor = @import("cursor.zig").Cursor;
 
 const app_name = "zulkan";
-
-const vertices = [_]Vertex{
-    .{ .pos = .{ -1, -1 }, .uv = .{ 0, 0 } }, // top left
-    .{ .pos = .{ 1, 1 }, .uv = .{ 1, 1 } }, // bottom right
-    .{ .pos = .{ 1, -1 }, .uv = .{ 1, 0 } }, // bottom left
-    .{ .pos = .{ 1, 1 }, .uv = .{ 1, 1 } }, // bottom right
-    .{ .pos = .{ -1, -1 }, .uv = .{ 0, 0 } }, // top left
-    .{ .pos = .{ -1, 1 }, .uv = .{ 0, 1 } }, // top right
-};
-
-pub const Rect = struct {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-
-    pub fn init(x: i32, y: i32, w: i32, h: i32) Rect {
-        return Rect{ .x = x, .y = y, .w = w, .h = h };
-    }
-
-    pub fn offsets3D(self: *const Rect) [2]vk.Offset3D {
-        return [2]vk.Offset3D{
-            .{ .x = self.x, .y = self.y, .z = 0 },
-            .{ .x = self.x + self.w, .y = self.y + self.h, .z = 1 },
-        };
-    }
-};
 
 pub fn main() !void {
     try sdl.init(.{
@@ -74,8 +58,8 @@ pub fn main() !void {
     std.debug.print("Created swapchain with {d} images\n", .{swapchain.swap_images.len});
 
     var compute = try ComputePipe.init(&ctx, allocator, vk.Extent2D{
-        .width = 200,
-        .height = 200,
+        .width = 600,
+        .height = 600,
     });
     defer compute.deinit();
 
@@ -88,23 +72,16 @@ pub fn main() !void {
     }, null);
     defer ctx.vkd.destroyCommandPool(ctx.dev, pool, null);
 
-    const vertex_buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
-        .flags = .{},
-        .size = @sizeOf(@TypeOf(vertices)),
-        .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-        .sharing_mode = .exclusive,
-        .queue_family_index_count = 0,
-        .p_queue_family_indices = undefined,
-    }, null);
-    defer ctx.vkd.destroyBuffer(ctx.dev, vertex_buffer, null);
-    const vertex_mem_reqs = ctx.vkd.getBufferMemoryRequirements(ctx.dev, vertex_buffer);
-    const vertex_memory = try ctx.allocate(vertex_mem_reqs, .{ .device_local_bit = true });
-    defer ctx.vkd.freeMemory(ctx.dev, vertex_memory, null);
-    try ctx.vkd.bindBufferMemory(ctx.dev, vertex_buffer, vertex_memory, 0);
+    var viewport = try Viewport.init(
+        &ctx,
+        @floatFromInt(extent.width),
+        @floatFromInt(extent.height),
+        @floatFromInt(compute.extent.width / 2),
+        @floatFromInt(compute.extent.height / 2),
+    );
+    defer viewport.deinit();
 
-    try uploadVertices(&ctx, pool, vertex_buffer);
-
-    const cursor = try Cursor.init(&ctx, pool, 3, 3);
+    var cursor = try Cursor.init(&ctx, pool, 3, 3);
     createGlider(&cursor);
     defer cursor.deinit();
 
@@ -133,9 +110,11 @@ pub fn main() !void {
 
     var cmdbufs = [3]vk.CommandBuffer{ .null_handle, .null_handle, .null_handle };
 
-    const interval = 1e9 / 10;
+    const interval = 1e9 / 20;
     var lastTick = try std.time.Instant.now();
-    var mouseHeld = false;
+    var placeHeld = false;
+    var panHeld = false;
+    var mouse = Vec2{ .x = 0, .y = 0 };
 
     var running = true;
     var simulating = false;
@@ -152,6 +131,18 @@ pub fn main() !void {
                     if (event.key_down.keycode == sdl.Keycode.space) {
                         simulating = !simulating;
                     }
+                    if (event.key_down.keycode == sdl.Keycode.a) {
+                        viewport.pan(-10, 0);
+                    }
+                    if (event.key_down.keycode == sdl.Keycode.d) {
+                        viewport.pan(10, 0);
+                    }
+                    if (event.key_down.keycode == sdl.Keycode.w) {
+                        viewport.pan(0, -10);
+                    }
+                    if (event.key_down.keycode == sdl.Keycode.s) {
+                        viewport.pan(0, 10);
+                    }
                 },
                 sdl.Event.quit => {
                     running = false;
@@ -166,36 +157,54 @@ pub fn main() !void {
                             std.debug.print("(sdl) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
                             try swapchain.recreate(extent);
                             try graphics.resize(&swapchain);
+                            viewport.resize(@floatFromInt(extent.width), @floatFromInt(extent.height));
 
                             std.debug.print("(sdl) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
                         }
                     },
                     else => {},
                 },
-                sdl.Event.mouse_button_down => |mouse_event| {
-                    const wr = @as(f32, @floatFromInt(compute.extent.width)) / @as(f32, @floatFromInt(extent.width));
-                    const hr = @as(f32, @floatFromInt(compute.extent.height)) / @as(f32, @floatFromInt(extent.height));
-                    const x: i32 = @intFromFloat(@as(f32, @floatFromInt(mouse_event.x)) * wr);
-                    const y: i32 = @intFromFloat(@as(f32, @floatFromInt(mouse_event.y)) * hr);
-
-                    try cursor.paste(pool, compute.buffers[prev_frame], x, y);
-                    mouseHeld = true;
-                },
-                sdl.Event.mouse_button_up => {
-                    mouseHeld = false;
-                },
-                sdl.Event.mouse_motion => |mouse_event| {
-                    const wr = @as(f32, @floatFromInt(compute.extent.width)) / @as(f32, @floatFromInt(extent.width));
-                    const hr = @as(f32, @floatFromInt(compute.extent.height)) / @as(f32, @floatFromInt(extent.height));
-                    const x: i32 = @intFromFloat(@as(f32, @floatFromInt(mouse_event.x)) * wr);
-                    const y: i32 = @intFromFloat(@as(f32, @floatFromInt(mouse_event.y)) * hr);
-
-                    if (mouseHeld) {
-                        try cursor.paste(pool, compute.buffers[prev_frame], x, y);
+                sdl.Event.mouse_button_down => |down| {
+                    mouse = Vec2{ .x = @floatFromInt(down.x), .y = @floatFromInt(down.y) };
+                    switch (down.button) {
+                        .right => {
+                            panHeld = true;
+                        },
+                        .left => {
+                            placeHeld = true;
+                            const w = viewport.screenToWorld(Vec2{ .x = @floatFromInt(down.x), .y = @floatFromInt(down.y) });
+                            try cursor.paste(pool, compute.buffers[prev_frame], @intFromFloat(w.x), @intFromFloat(w.y));
+                        },
+                        else => {},
                     }
+                },
+                sdl.Event.mouse_button_up => |up| {
+                    switch (up.button) {
+                        .right => {
+                            panHeld = false;
+                        },
+                        .left => {
+                            placeHeld = false;
+                        },
+                        else => {},
+                    }
+                },
+                sdl.Event.mouse_motion => |move| {
+                    mouse = Vec2{ .x = @floatFromInt(move.x), .y = @floatFromInt(move.y) };
+                    if (panHeld) {
+                        viewport.pan(@floatFromInt(-move.delta_x), @floatFromInt(-move.delta_y));
+                    }
+                },
+                sdl.Event.mouse_wheel => |wheel| {
+                    viewport.zoom(@floatFromInt(wheel.delta_y));
                 },
                 else => {},
             }
+        }
+
+        if (placeHeld) {
+            const w = viewport.screenToWorld(Vec2{ .x = mouse.x, .y = mouse.y });
+            try cursor.paste(pool, compute.buffers[prev_frame], @intFromFloat(w.x), @intFromFloat(w.y));
         }
 
         const now = try std.time.Instant.now();
@@ -216,12 +225,12 @@ pub fn main() !void {
         }
         cmdbufs[frame] = try createCommandBuffers(
             &ctx,
-            pool,
-            frame,
-            vertex_buffer,
-            swapchain.extent,
+            &viewport,
             &graphics,
             &compute,
+            pool,
+            swapchain.extent,
+            frame,
             tick,
         );
         const cmdbuf = cmdbufs[frame];
@@ -238,6 +247,7 @@ pub fn main() !void {
             std.debug.print("(swap) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
             try swapchain.recreate(extent);
             try graphics.resize(&swapchain);
+            viewport.resize(@floatFromInt(extent.width), @floatFromInt(extent.height));
 
             std.debug.print("(swap) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
         }
@@ -249,135 +259,14 @@ pub fn main() !void {
     try swapchain.waitForAllFences();
 }
 
-fn uploadVertices(ctx: *const VkContext, pool: vk.CommandPool, buffer: vk.Buffer) !void {
-    const staging_buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
-        .flags = .{},
-        .size = @sizeOf(@TypeOf(vertices)),
-        .usage = .{ .transfer_src_bit = true },
-        .sharing_mode = .exclusive,
-        .queue_family_index_count = 0,
-        .p_queue_family_indices = undefined,
-    }, null);
-    defer ctx.vkd.destroyBuffer(ctx.dev, staging_buffer, null);
-    const mem_reqs = ctx.vkd.getBufferMemoryRequirements(ctx.dev, staging_buffer);
-    const staging_memory = try ctx.allocate(mem_reqs, .{ .host_visible_bit = true, .host_coherent_bit = true });
-    defer ctx.vkd.freeMemory(ctx.dev, staging_memory, null);
-    try ctx.vkd.bindBufferMemory(ctx.dev, staging_buffer, staging_memory, 0);
-
-    {
-        const data = try ctx.vkd.mapMemory(ctx.dev, staging_memory, 0, vk.WHOLE_SIZE, .{});
-        defer ctx.vkd.unmapMemory(ctx.dev, staging_memory);
-
-        const gpu_vertices: [*]Vertex = @ptrCast(@alignCast(data));
-        for (vertices, 0..) |vertex, i| {
-            gpu_vertices[i] = vertex;
-        }
-    }
-
-    try copyBuffer(ctx, pool, buffer, staging_buffer, @sizeOf(@TypeOf(vertices)));
-}
-
-fn copyBuffer(gc: *const VkContext, pool: vk.CommandPool, dst: vk.Buffer, src: vk.Buffer, size: vk.DeviceSize) !void {
-    var cmdbuf: vk.CommandBuffer = undefined;
-    try gc.vkd.allocateCommandBuffers(gc.dev, &.{
-        .command_pool = pool,
-        .level = .primary,
-        .command_buffer_count = 1,
-    }, @ptrCast(&cmdbuf));
-    defer gc.vkd.freeCommandBuffers(gc.dev, pool, 1, @ptrCast(&cmdbuf));
-
-    try gc.vkd.beginCommandBuffer(cmdbuf, &.{
-        .flags = .{ .one_time_submit_bit = true },
-        .p_inheritance_info = null,
-    });
-
-    const region = vk.BufferCopy{
-        .src_offset = 0,
-        .dst_offset = 0,
-        .size = size,
-    };
-    gc.vkd.cmdCopyBuffer(cmdbuf, src, dst, 1, @ptrCast(&region));
-
-    try gc.vkd.endCommandBuffer(cmdbuf);
-
-    const si = vk.SubmitInfo{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast(&cmdbuf),
-        .signal_semaphore_count = 0,
-        .p_signal_semaphores = undefined,
-    };
-    try gc.vkd.queueSubmit(gc.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
-    try gc.vkd.queueWaitIdle(gc.graphics_queue.handle);
-}
-
-fn blitImage(ctx: *const VkContext, pool: vk.CommandPool, src: vk.Image, dst: vk.Image, src_rect: Rect, dst_rect: Rect) !void {
-    var cmdbuf: vk.CommandBuffer = undefined;
-    try ctx.vkd.allocateCommandBuffers(ctx.dev, &.{
-        .command_pool = pool,
-        .level = .primary,
-        .command_buffer_count = 1,
-    }, @ptrCast(&cmdbuf));
-    defer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&cmdbuf));
-
-    try ctx.vkd.beginCommandBuffer(cmdbuf, &.{
-        .flags = .{ .one_time_submit_bit = true },
-        .p_inheritance_info = null,
-    });
-
-    ctx.vkd.cmdBlitImage(
-        cmdbuf,
-        src,
-        vk.ImageLayout.general,
-        dst,
-        vk.ImageLayout.general,
-        1,
-        &[_]vk.ImageBlit{
-            .{
-                .src_subresource = .{
-                    .aspect_mask = .{ .color_bit = true },
-                    .mip_level = 0,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                },
-                .src_offsets = src_rect.offsets3D(),
-                .dst_subresource = .{
-                    .aspect_mask = .{ .color_bit = true },
-                    .mip_level = 0,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                },
-                .dst_offsets = dst_rect.offsets3D(),
-            },
-        },
-        vk.Filter.nearest,
-    );
-
-    try ctx.vkd.endCommandBuffer(cmdbuf);
-
-    const si = vk.SubmitInfo{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast(&cmdbuf),
-        .signal_semaphore_count = 0,
-        .p_signal_semaphores = undefined,
-    };
-    try ctx.vkd.queueSubmit(ctx.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
-    try ctx.vkd.queueWaitIdle(ctx.graphics_queue.handle);
-}
-
 fn createCommandBuffers(
     ctx: *const VkContext,
+    view: *const Viewport,
+    gfx: *const GraphicsPipe,
+    compute: *const ComputePipe,
     pool: vk.CommandPool,
-    i: usize,
-    buffer: vk.Buffer,
     extent: vk.Extent2D,
-    gfx: *GraphicsPipe,
-    compute: *ComputePipe,
+    i: usize,
     tick: bool,
 ) !vk.CommandBuffer {
     var cmdbuf: vk.CommandBuffer = undefined;
@@ -390,7 +279,7 @@ fn createCommandBuffers(
     errdefer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&cmdbuf));
 
     const clear = vk.ClearValue{
-        .color = .{ .float_32 = .{ 0, 0, 0, 1 } },
+        .color = .{ .float_32 = .{ 0.05, 0.05, 0.05, 1 } },
     };
 
     const viewport = vk.Viewport{
@@ -466,101 +355,24 @@ fn createCommandBuffers(
         .p_clear_values = @as([*]const vk.ClearValue, @ptrCast(&clear)),
     }, .@"inline");
 
+    ctx.vkd.cmdPushConstants(cmdbuf, gfx.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GraphicsArgs), @ptrCast(&GraphicsArgs{
+        .proj = view.matrix(),
+        .model = zm.scaling(@floatFromInt(compute.extent.width), @floatFromInt(compute.extent.height), 1),
+        .size = Vec2{
+            .x = @floatFromInt(compute.extent.width),
+            .y = @floatFromInt(compute.extent.height),
+        },
+    }));
+
     ctx.vkd.cmdBindDescriptorSets(cmdbuf, .graphics, gfx.pipeline_layout, 0, 1, @as([*]const vk.DescriptorSet, @ptrCast(&gfx.descriptors[i])), 0, null);
     ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, gfx.pipeline);
-    const offset = [_]vk.DeviceSize{0};
-    ctx.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @as([*]const vk.Buffer, @ptrCast(&buffer)), &offset);
-    ctx.vkd.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
+    ctx.vkd.cmdDraw(cmdbuf, 6, 1, 0, 0);
 
     ctx.vkd.cmdEndRenderPass(cmdbuf);
     try ctx.vkd.endCommandBuffer(cmdbuf);
 
     return cmdbuf;
 }
-
-const Color = struct {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
-};
-
-pub const Cursor = struct {
-    pixels: []Color,
-    width: i32,
-    height: i32,
-
-    image: vk.Image,
-    buffer: vk.Buffer,
-    memory: vk.DeviceMemory,
-
-    ctx: *const VkContext,
-
-    pub fn init(ctx: *const VkContext, pool: vk.CommandPool, width: i32, height: i32) !Cursor {
-        const image = try ctx.vkd.createImage(ctx.dev, &.{
-            .flags = .{},
-            .image_type = vk.ImageType.@"2d",
-            .format = vk.Format.r8g8b8a8_unorm,
-            .extent = vk.Extent3D{ .width = @intCast(width), .height = @intCast(height), .depth = 1 },
-            .mip_levels = 1,
-            .array_layers = 1,
-            .samples = .{ .@"1_bit" = true },
-            .tiling = vk.ImageTiling.linear,
-            .usage = .{ .transfer_src_bit = true, .sampled_bit = true },
-            .sharing_mode = vk.SharingMode.exclusive,
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-            .initial_layout = vk.ImageLayout.preinitialized,
-        }, null);
-        const mem_req = ctx.vkd.getImageMemoryRequirements(ctx.dev, image);
-        const memory = try ctx.allocate(mem_req, .{ .host_visible_bit = true, .host_coherent_bit = true });
-        try ctx.vkd.bindImageMemory(ctx.dev, image, memory, 0);
-
-        const buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
-            .flags = .{},
-            .size = mem_req.size,
-            .usage = .{ .transfer_src_bit = true },
-            .sharing_mode = .exclusive,
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-        }, null);
-        try ctx.vkd.bindBufferMemory(ctx.dev, buffer, memory, 0);
-
-        const cursor_image_ptr = try ctx.vkd.mapMemory(ctx.dev, memory, 0, vk.WHOLE_SIZE, .{});
-        const cursor_image_colors: [*]Color = @ptrCast(@alignCast(cursor_image_ptr));
-        const pixels: []Color = cursor_image_colors[0..@intCast(width * height)];
-
-        try transitionImage(ctx, pool, image, vk.ImageLayout.undefined, vk.ImageLayout.general);
-
-        return Cursor{
-            .ctx = ctx,
-            .pixels = pixels,
-            .width = width,
-            .height = height,
-            .image = image,
-            .buffer = buffer,
-            .memory = memory,
-        };
-    }
-
-    pub fn deinit(self: *const Cursor) void {
-        self.ctx.vkd.unmapMemory(self.ctx.dev, self.memory);
-        self.ctx.vkd.destroyBuffer(self.ctx.dev, self.buffer, null);
-        self.ctx.vkd.freeMemory(self.ctx.dev, self.memory, null);
-    }
-
-    pub fn set(self: *const Cursor, x: i32, y: i32, color: Color) void {
-        self.pixels[@intCast(y * self.width + x)] = color;
-    }
-
-    pub fn paste(self: *const Cursor, pool: vk.CommandPool, dst_image: vk.Image, x: i32, y: i32) !void {
-        // copy cursor to compute initial buffer (which is the last frame)
-        const src_rect = Rect.init(0, 0, self.width, self.height);
-        const dst_rect = Rect.init(x, y, self.width, self.height);
-
-        try blitImage(self.ctx, pool, self.image, dst_image, src_rect, dst_rect);
-    }
-};
 
 fn createGlider(cursor: *const Cursor) void {
     const alive = Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
@@ -574,53 +386,4 @@ fn createGlider(cursor: *const Cursor) void {
     cursor.set(2, 0, alive);
     cursor.set(2, 1, alive);
     cursor.set(2, 2, alive);
-}
-
-fn transitionImage(ctx: *const VkContext, pool: vk.CommandPool, image: vk.Image, from_layout: vk.ImageLayout, to_layout: vk.ImageLayout) !void {
-    var images = [_]vk.Image{image};
-    return try transitionImages(ctx, pool, &images, from_layout, to_layout);
-}
-
-fn transitionImages(ctx: *const VkContext, pool: vk.CommandPool, images: []vk.Image, from_layout: vk.ImageLayout, to_layout: vk.ImageLayout) !void {
-    var imgbuf: vk.CommandBuffer = .null_handle;
-    try ctx.vkd.allocateCommandBuffers(ctx.dev, &vk.CommandBufferAllocateInfo{
-        .command_pool = pool,
-        .level = .primary,
-        .command_buffer_count = 1,
-    }, @ptrCast(&imgbuf));
-    defer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&imgbuf));
-    try ctx.vkd.beginCommandBuffer(imgbuf, &vk.CommandBufferBeginInfo{});
-    for (images) |image| {
-        ctx.vkd.cmdPipelineBarrier(imgbuf, .{ .all_commands_bit = true }, .{ .all_commands_bit = true }, .{}, 0, null, 0, null, 1, &[_]vk.ImageMemoryBarrier{
-            .{
-                .image = image,
-                .src_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
-                .dst_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
-                .old_layout = from_layout,
-                .new_layout = to_layout,
-                .src_queue_family_index = ctx.graphics_queue.family,
-                .dst_queue_family_index = ctx.graphics_queue.family,
-                .subresource_range = vk.ImageSubresourceRange{
-                    .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
-                    .base_mip_level = 0,
-                    .level_count = 1,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                },
-            },
-        });
-    }
-    try ctx.vkd.endCommandBuffer(imgbuf);
-    try ctx.vkd.queueSubmit(ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{
-        .{
-            .wait_semaphore_count = 0,
-            .p_wait_semaphores = null,
-            .p_wait_dst_stage_mask = null,
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast(&imgbuf),
-            .signal_semaphore_count = 0,
-            .p_signal_semaphores = null,
-        },
-    }, .null_handle);
-    try ctx.vkd.queueWaitIdle(ctx.graphics_queue.handle);
 }
