@@ -28,6 +28,7 @@ pub const ComputePipe = struct {
     pub fn init(ctx: *const VkContext, allocator: std.mem.Allocator, extent: vk.Extent2D) !ComputePipe {
         const shader = try Shader.compile(ctx, allocator, Shader.Stage.compute, "shaders/game_of_life.glsl");
         const frames = 3;
+        const format = vk.Format.r8g8_unorm;
 
         const pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
             .max_sets = @intCast(frames),
@@ -111,7 +112,7 @@ pub const ComputePipe = struct {
         for (0..buffers.len) |i| {
             buffers[i] = try ctx.vkd.createImage(ctx.dev, &vk.ImageCreateInfo{
                 .image_type = vk.ImageType.@"2d",
-                .format = vk.Format.r8g8b8a8_unorm,
+                .format = format,
                 .extent = .{
                     .width = extent.width,
                     .height = extent.height,
@@ -144,7 +145,7 @@ pub const ComputePipe = struct {
             buffer_views[i] = try ctx.vkd.createImageView(ctx.dev, &vk.ImageViewCreateInfo{
                 .image = buffers[i],
                 .view_type = vk.ImageViewType.@"2d",
-                .format = vk.Format.r8g8b8a8_unorm,
+                .format = format,
                 .components = .{
                     .r = vk.ComponentSwizzle.identity,
                     .g = vk.ComponentSwizzle.identity,

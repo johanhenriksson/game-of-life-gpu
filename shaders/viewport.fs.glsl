@@ -7,5 +7,7 @@ layout(location = 0) out vec4 f_color;
 layout(binding = 0) uniform sampler2D image;
 
 void main() {
-    f_color = texture(image, v_uv);
+    vec2 cell = texture(image, v_uv).xy;
+
+    f_color = vec4(cell.x, cell.y, cell.y, 1);
 }

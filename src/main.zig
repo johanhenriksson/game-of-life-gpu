@@ -58,8 +58,8 @@ pub fn main() !void {
     std.debug.print("Created swapchain with {d} images\n", .{swapchain.swap_images.len});
 
     var compute = try ComputePipe.init(&ctx, allocator, vk.Extent2D{
-        .width = 600,
-        .height = 600,
+        .width = 1000,
+        .height = 1000,
     });
     defer compute.deinit();
 
