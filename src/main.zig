@@ -69,7 +69,7 @@ pub fn main() !void {
     }, null);
     defer ctx.vkd.destroyCommandPool(ctx.dev, pool, null);
 
-    const buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
+    const vertex_buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
         .flags = .{},
         .size = @sizeOf(@TypeOf(vertices)),
         .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
@@ -77,94 +77,61 @@ pub fn main() !void {
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
     }, null);
-    defer ctx.vkd.destroyBuffer(ctx.dev, buffer, null);
-    const mem_reqs = ctx.vkd.getBufferMemoryRequirements(ctx.dev, buffer);
-    const memory = try ctx.allocate(mem_reqs, .{ .device_local_bit = true });
-    defer ctx.vkd.freeMemory(ctx.dev, memory, null);
-    try ctx.vkd.bindBufferMemory(ctx.dev, buffer, memory, 0);
+    defer ctx.vkd.destroyBuffer(ctx.dev, vertex_buffer, null);
+    const vertex_mem_reqs = ctx.vkd.getBufferMemoryRequirements(ctx.dev, vertex_buffer);
+    const vertex_memory = try ctx.allocate(vertex_mem_reqs, .{ .device_local_bit = true });
+    defer ctx.vkd.freeMemory(ctx.dev, vertex_memory, null);
+    try ctx.vkd.bindBufferMemory(ctx.dev, vertex_buffer, vertex_memory, 0);
 
-    try uploadVertices(&ctx, pool, buffer);
+    try uploadVertices(&ctx, pool, vertex_buffer);
 
-    std.debug.print("Uploaded vertices\n", .{});
-
-    const test_image_size = compute.extent.width * compute.extent.height * @sizeOf(Color);
-    std.debug.print("Source buffer size {}\n", .{test_image_size});
-    const test_buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
+    const cursor_image = try ctx.vkd.createImage(ctx.dev, &.{
         .flags = .{},
-        .size = test_image_size,
+        .image_type = vk.ImageType.@"2d",
+        .format = vk.Format.r8g8b8a8_unorm,
+        .extent = vk.Extent3D{ .width = 32, .height = 32, .depth = 1 },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .samples = .{ .@"1_bit" = true },
+        .tiling = vk.ImageTiling.linear,
+        .usage = .{ .transfer_src_bit = true, .sampled_bit = true },
+        .sharing_mode = vk.SharingMode.exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .initial_layout = vk.ImageLayout.preinitialized,
+    }, null);
+    defer ctx.vkd.destroyImage(ctx.dev, cursor_image, null);
+    const cursor_mem_req = ctx.vkd.getImageMemoryRequirements(ctx.dev, cursor_image);
+    const cursor_memory = try ctx.allocate(cursor_mem_req, .{ .host_visible_bit = true, .host_coherent_bit = true });
+    defer ctx.vkd.freeMemory(ctx.dev, cursor_memory, null);
+    try ctx.vkd.bindImageMemory(ctx.dev, cursor_image, cursor_memory, 0);
+
+    const cursor_buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
+        .flags = .{},
+        .size = cursor_mem_req.size,
         .usage = .{ .transfer_src_bit = true },
         .sharing_mode = .exclusive,
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
     }, null);
-    defer ctx.vkd.destroyBuffer(ctx.dev, test_buffer, null);
-    const test_mem_reqs = ctx.vkd.getBufferMemoryRequirements(ctx.dev, test_buffer);
-    const test_memory = try ctx.allocate(test_mem_reqs, .{ .host_visible_bit = true });
-    defer ctx.vkd.freeMemory(ctx.dev, test_memory, null);
-    try ctx.vkd.bindBufferMemory(ctx.dev, test_buffer, test_memory, 0);
+    defer ctx.vkd.destroyBuffer(ctx.dev, cursor_buffer, null);
+    try ctx.vkd.bindBufferMemory(ctx.dev, cursor_buffer, cursor_memory, 0);
 
-    const test_image_ptr = try ctx.vkd.mapMemory(ctx.dev, test_memory, 0, vk.WHOLE_SIZE, .{});
-    defer ctx.vkd.unmapMemory(ctx.dev, test_memory);
+    const test_image_ptr = try ctx.vkd.mapMemory(ctx.dev, cursor_memory, 0, vk.WHOLE_SIZE, .{});
+    defer ctx.vkd.unmapMemory(ctx.dev, cursor_memory);
     const test_image_data = try createTestImage(allocator, compute.extent);
     const test_image_colors: [*]Color = @ptrCast(@alignCast(test_image_ptr));
     for (test_image_data, 0..) |color, i| {
         test_image_colors[i] = color;
     }
 
-    var imgbuf: vk.CommandBuffer = .null_handle;
-    try ctx.vkd.allocateCommandBuffers(ctx.dev, &vk.CommandBufferAllocateInfo{
-        .command_pool = pool,
-        .level = .primary,
-        .command_buffer_count = 1,
-    }, @ptrCast(&imgbuf));
-    defer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&imgbuf));
-    try ctx.vkd.beginCommandBuffer(imgbuf, &vk.CommandBufferBeginInfo{});
-    for (0..compute.buffers.len) |i| {
-        ctx.vkd.cmdPipelineBarrier(imgbuf, .{ .all_commands_bit = true }, .{ .all_commands_bit = true }, .{}, 0, null, 0, null, 1, &[_]vk.ImageMemoryBarrier{
-            .{
-                .image = compute.buffers[i],
-                .src_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
-                .dst_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
-                .old_layout = vk.ImageLayout.undefined,
-                .new_layout = vk.ImageLayout.general,
-                .src_queue_family_index = ctx.graphics_queue.family,
-                .dst_queue_family_index = ctx.graphics_queue.family,
-                .subresource_range = vk.ImageSubresourceRange{
-                    .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
-                    .base_mip_level = 0,
-                    .level_count = 1,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                },
-            },
-        });
-    }
-    try ctx.vkd.endCommandBuffer(imgbuf);
-    try ctx.vkd.queueSubmit(ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{
-        .{
-            .wait_semaphore_count = 0,
-            .p_wait_semaphores = null,
-            .p_wait_dst_stage_mask = null,
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast(&imgbuf),
-            .signal_semaphore_count = 0,
-            .p_signal_semaphores = null,
-        },
-    }, .null_handle);
-    try ctx.vkd.queueWaitIdle(ctx.graphics_queue.handle);
+    try transitionImage(&ctx, pool, cursor_image, vk.ImageLayout.undefined, vk.ImageLayout.general);
+    try transitionImages(&ctx, pool, compute.buffers, vk.ImageLayout.undefined, vk.ImageLayout.general);
 
-    for (0..compute.buffers.len) |i| {
-        const target_buf = try ctx.vkd.createBuffer(ctx.dev, &vk.BufferCreateInfo{
-            .size = test_image_size,
-            .usage = .{
-                .transfer_dst_bit = true,
-            },
-            .sharing_mode = vk.SharingMode.exclusive,
-        }, null);
-        try ctx.vkd.bindBufferMemory(ctx.dev, target_buf, compute.buffer_memory[i], 0);
-        try copyBuffer(&ctx, pool, target_buf, test_buffer, compute.extent.width * compute.extent.height * @sizeOf(Color));
-        ctx.vkd.destroyBuffer(ctx.dev, target_buf, null);
-    }
+    // copy cursor to compute initial buffer (which is the last frame)
+    const src_region = [2]vk.Offset2D{ .{ .x = 0, .y = 0 }, .{ .x = 32, .y = 32 } };
+    const dst_region = [2]vk.Offset2D{ .{ .x = 0, .y = 0 }, .{ .x = 32, .y = 32 } };
+    try blitImage(&ctx, pool, cursor_image, compute.buffers[compute.buffers.len - 1], src_region, dst_region);
 
     std.debug.print("Uploaded test image\n", .{});
 
@@ -193,7 +160,7 @@ pub fn main() !void {
         &ctx,
         pool,
         allocator,
-        buffer,
+        vertex_buffer,
         swapchain.extent,
         &graphics,
         &compute,
@@ -229,7 +196,7 @@ pub fn main() !void {
                                 &ctx,
                                 pool,
                                 allocator,
-                                buffer,
+                                vertex_buffer,
                                 swapchain.extent,
                                 &graphics,
                                 &compute,
@@ -264,7 +231,7 @@ pub fn main() !void {
                 &ctx,
                 pool,
                 allocator,
-                buffer,
+                vertex_buffer,
                 swapchain.extent,
                 &graphics,
                 &compute,
@@ -272,6 +239,8 @@ pub fn main() !void {
 
             std.debug.print("(swap) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
         }
+
+        std.time.sleep(1e9);
     }
     std.debug.print("Exiting...\n", .{});
 
@@ -340,6 +309,68 @@ fn copyBuffer(gc: *const VkContext, pool: vk.CommandPool, dst: vk.Buffer, src: v
     };
     try gc.vkd.queueSubmit(gc.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
     try gc.vkd.queueWaitIdle(gc.graphics_queue.handle);
+}
+
+fn blitImage(ctx: *const VkContext, pool: vk.CommandPool, src: vk.Image, dst: vk.Image, src_region: [2]vk.Offset2D, dst_region: [2]vk.Offset2D) !void {
+    var cmdbuf: vk.CommandBuffer = undefined;
+    try ctx.vkd.allocateCommandBuffers(ctx.dev, &.{
+        .command_pool = pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, @ptrCast(&cmdbuf));
+    defer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&cmdbuf));
+
+    try ctx.vkd.beginCommandBuffer(cmdbuf, &.{
+        .flags = .{ .one_time_submit_bit = true },
+        .p_inheritance_info = null,
+    });
+
+    ctx.vkd.cmdBlitImage(
+        cmdbuf,
+        src,
+        vk.ImageLayout.general,
+        dst,
+        vk.ImageLayout.general,
+        1,
+        &[_]vk.ImageBlit{
+            .{
+                .src_subresource = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .mip_level = 0,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+                .src_offsets = [2]vk.Offset3D{
+                    .{ .x = src_region[0].x, .y = src_region[0].y, .z = 0 },
+                    .{ .x = src_region[1].x, .y = src_region[1].y, .z = 1 },
+                },
+                .dst_subresource = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .mip_level = 0,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+                .dst_offsets = [2]vk.Offset3D{
+                    .{ .x = dst_region[0].x, .y = dst_region[0].y, .z = 0 }, .{ .x = dst_region[1].x, .y = dst_region[1].y, .z = 1 },
+                },
+            },
+        },
+        vk.Filter.nearest,
+    );
+
+    try ctx.vkd.endCommandBuffer(cmdbuf);
+
+    const si = vk.SubmitInfo{
+        .wait_semaphore_count = 0,
+        .p_wait_semaphores = undefined,
+        .p_wait_dst_stage_mask = undefined,
+        .command_buffer_count = 1,
+        .p_command_buffers = @ptrCast(&cmdbuf),
+        .signal_semaphore_count = 0,
+        .p_signal_semaphores = undefined,
+    };
+    try ctx.vkd.queueSubmit(ctx.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
+    try ctx.vkd.queueWaitIdle(ctx.graphics_queue.handle);
 }
 
 fn createCommandBuffers(
@@ -471,12 +502,63 @@ fn createTestImage(allocator: std.mem.Allocator, extent: vk.Extent2D) ![]Color {
     for (0..extent.height) |y| {
         for (0..extent.width) |x| {
             img[y * extent.width + x] = Color{
-                .r = 255,
+                .r = 255 * std.crypto.random.intRangeAtMost(u8, 0, 1),
                 .g = 0,
                 .b = 0,
                 .a = 255,
             };
         }
     }
+    // top-left is always white
+    img[0] = Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
     return img;
+}
+
+fn transitionImage(ctx: *const VkContext, pool: vk.CommandPool, image: vk.Image, from_layout: vk.ImageLayout, to_layout: vk.ImageLayout) !void {
+    var images = [_]vk.Image{image};
+    return try transitionImages(ctx, pool, &images, from_layout, to_layout);
+}
+
+fn transitionImages(ctx: *const VkContext, pool: vk.CommandPool, images: []vk.Image, from_layout: vk.ImageLayout, to_layout: vk.ImageLayout) !void {
+    var imgbuf: vk.CommandBuffer = .null_handle;
+    try ctx.vkd.allocateCommandBuffers(ctx.dev, &vk.CommandBufferAllocateInfo{
+        .command_pool = pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, @ptrCast(&imgbuf));
+    defer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&imgbuf));
+    try ctx.vkd.beginCommandBuffer(imgbuf, &vk.CommandBufferBeginInfo{});
+    for (images) |image| {
+        ctx.vkd.cmdPipelineBarrier(imgbuf, .{ .all_commands_bit = true }, .{ .all_commands_bit = true }, .{}, 0, null, 0, null, 1, &[_]vk.ImageMemoryBarrier{
+            .{
+                .image = image,
+                .src_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
+                .dst_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
+                .old_layout = from_layout,
+                .new_layout = to_layout,
+                .src_queue_family_index = ctx.graphics_queue.family,
+                .dst_queue_family_index = ctx.graphics_queue.family,
+                .subresource_range = vk.ImageSubresourceRange{
+                    .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            },
+        });
+    }
+    try ctx.vkd.endCommandBuffer(imgbuf);
+    try ctx.vkd.queueSubmit(ctx.graphics_queue.handle, 1, &[_]vk.SubmitInfo{
+        .{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = null,
+            .p_wait_dst_stage_mask = null,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast(&imgbuf),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = null,
+        },
+    }, .null_handle);
+    try ctx.vkd.queueWaitIdle(ctx.graphics_queue.handle);
 }

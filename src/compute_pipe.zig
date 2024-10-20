@@ -22,7 +22,7 @@ pub const ComputePipe = struct {
     buffer_sampler: []vk.Sampler,
 
     pub fn init(ctx: *const VkContext, allocator: std.mem.Allocator, extent: vk.Extent2D) !ComputePipe {
-        const shader = try Shader.compile(ctx, allocator, Shader.Stage.compute, "shaders/hello.glsl");
+        const shader = try Shader.compile(ctx, allocator, Shader.Stage.compute, "shaders/game_of_life.glsl");
         const frames = 3;
 
         const pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
