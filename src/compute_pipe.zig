@@ -3,6 +3,10 @@ const vk = @import("vulkan");
 const VkContext = @import("context.zig").VkContext;
 const Shader = @import("shader.zig");
 
+pub const PushConstants = struct {
+    enabled: i32,
+};
+
 pub const ComputePipe = struct {
     ctx: *const VkContext,
     allocator: std.mem.Allocator,
@@ -65,9 +69,18 @@ pub const ComputePipe = struct {
             .p_set_layouts = &[_]vk.DescriptorSetLayout{ layout, layout, layout },
         }, descriptors.ptr);
 
+        const pushConstantRange = vk.PushConstantRange{
+            .stage_flags = .{ .compute_bit = true },
+            .offset = 0,
+            .size = @sizeOf(PushConstants),
+        };
+
         const pipeline_layout = try ctx.vkd.createPipelineLayout(ctx.dev, &vk.PipelineLayoutCreateInfo{
             .set_layout_count = 1,
             .p_set_layouts = &[_]vk.DescriptorSetLayout{layout},
+
+            .push_constant_range_count = 1,
+            .p_push_constant_ranges = &[_]vk.PushConstantRange{pushConstantRange},
         }, null);
         errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.dev, layout, null);
 

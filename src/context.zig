@@ -120,6 +120,7 @@ const DeviceDispatch = vk.DeviceWrapper(&[_]vk.ApiInfo{
             .cmdBindVertexBuffers = true,
             .cmdCopyBuffer = true,
             .cmdDispatch = true,
+            .cmdPushConstants = true,
         },
     },
 });

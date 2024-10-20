@@ -133,6 +133,11 @@ pub const Swapchain = struct {
         return &self.swap_images[self.image_index];
     }
 
+    pub fn waitForRender(self: *Swapchain) !void {
+        const current = self.currentSwapImage();
+        try current.waitForFence(self.ctx);
+    }
+
     pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
         // Simple method:
         // 1) Acquire next image
