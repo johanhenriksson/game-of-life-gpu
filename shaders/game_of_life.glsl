@@ -27,11 +27,16 @@ void main() {
     for(int y = -1; y <= 1; y++) {
         for(int x = -1; x <= 1; x++) {
             ivec2 neighbor = cell + ivec2(x, y);
-            if(neighbor.x >= 0 && neighbor.x < size.x && neighbor.y >= 0 && neighbor.y < size.y) {
-                vec4 current = imageLoad(prev, neighbor);
-                if(cell_alive(current)) {
-                    neighbors++;
-                }
+
+            // wrap around edges
+            if(neighbor.x < 0) neighbor.x += size.x;
+            if(neighbor.x >= size.x) neighbor.x -= size.x;
+            if(neighbor.y < 0) neighbor.y += size.y;
+            if(neighbor.y >= size.y) neighbor.y -= size.y;
+
+            vec4 current = imageLoad(prev, neighbor);
+            if(cell_alive(current)) {
+                neighbors++;
             }
         }
     }
