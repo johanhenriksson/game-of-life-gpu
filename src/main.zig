@@ -10,6 +10,7 @@ const VkContext = @import("context.zig").VkContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Allocator = std.mem.Allocator;
 const Viewport = @import("viewport.zig").Viewport;
+const Pattern = @import("pattern.zig").Pattern;
 
 const zm = @import("zmath");
 const Vec2 = @import("primitives.zig").Vec2;
@@ -81,9 +82,21 @@ pub fn main() !void {
     );
     defer viewport.deinit();
 
-    var cursor = try Cursor.init(&ctx, pool);
-    createGlider(&cursor);
+    const patterns = try Pattern.loadDir(allocator, "cells");
+    var biggest_pattern = patterns[0];
+    var biggest_size: usize = 0;
+    for (patterns) |pattern| {
+        const size = pattern.width * pattern.height;
+        if (size > biggest_size) {
+            biggest_pattern = pattern;
+            biggest_size = size;
+        }
+    }
+
+    var cursor = try Cursor.init(&ctx, pool, biggest_pattern.width, biggest_pattern.height);
     defer cursor.deinit();
+
+    try cursor.setPattern(&biggest_pattern);
 
     try transitionImages(&ctx, pool, compute.buffers, vk.ImageLayout.undefined, vk.ImageLayout.general);
 
@@ -374,17 +387,18 @@ fn createCommandBuffers(
     return cmdbuf;
 }
 
-fn createGlider(cursor: *Cursor) void {
+fn createGlider(cursor: *Cursor) !void {
+    const dead = Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
     const alive = Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
 
     cursor.clear();
-    cursor.set(0, 0, alive);
-    cursor.set(0, 1, alive);
-    cursor.set(0, 2, alive);
-    cursor.set(1, 0, alive);
-    cursor.set(1, 1, Color{ .r = 0, .g = 0, .b = 0, .a = 255 });
-    cursor.set(1, 2, alive);
-    cursor.set(2, 0, alive);
-    cursor.set(2, 1, alive);
-    cursor.set(2, 2, alive);
+    try cursor.set(0, 0, dead);
+    try cursor.set(0, 1, dead);
+    try cursor.set(0, 2, alive);
+    try cursor.set(1, 0, alive);
+    try cursor.set(1, 1, dead);
+    try cursor.set(1, 2, alive);
+    try cursor.set(2, 0, dead);
+    try cursor.set(2, 1, alive);
+    try cursor.set(2, 2, alive);
 }

@@ -1,5 +1,7 @@
 const Color = @import("primitives.zig").Color;
 const Rect = @import("primitives.zig").Rect;
+const Pattern = @import("pattern.zig").Pattern;
+
 const VkContext = @import("context.zig").VkContext;
 const vk = @import("vulkan");
 
@@ -8,21 +10,18 @@ const blitImage = @import("helper.zig").blitImage;
 
 pub const Cursor = struct {
     pixels: []Color,
-    width: i32,
-    height: i32,
+    width: usize,
+    height: usize,
 
     image: vk.Image,
     buffer: vk.Buffer,
     memory: vk.DeviceMemory,
-    max_width: i32,
-    max_height: i32,
+    max_width: usize,
+    max_height: usize,
 
     ctx: *const VkContext,
 
-    pub fn init(ctx: *const VkContext, pool: vk.CommandPool) !Cursor {
-        const max_width = 64;
-        const max_height = 64;
-
+    pub fn init(ctx: *const VkContext, pool: vk.CommandPool, max_width: usize, max_height: usize) !Cursor {
         const image = try ctx.vkd.createImage(ctx.dev, &.{
             .flags = .{},
             .image_type = vk.ImageType.@"2d",
@@ -85,16 +84,36 @@ pub const Cursor = struct {
         self.height = 0;
     }
 
-    pub fn set(self: *Cursor, x: i32, y: i32, color: Color) void {
+    pub fn set(self: *Cursor, x: usize, y: usize, color: Color) !void {
+        if (x < 0 or x >= self.max_width or y < 0 or y >= self.max_height) {
+            return error.OutOfBounds;
+        }
         self.width = @max(self.width, x + 1);
         self.height = @max(self.height, y + 1);
-        self.pixels[@intCast(y * self.max_width + x)] = color;
+        self.pixels[y * self.max_width + x] = color;
+    }
+
+    pub fn setPattern(self: *Cursor, pattern: *const Pattern) !void {
+        if (pattern.width > self.max_width or pattern.height > self.max_height) {
+            return error.OutOfBounds;
+        }
+        self.clear();
+        for (0..pattern.height) |y| {
+            for (0..pattern.width) |x| {
+                const cell = try pattern.get(x, y);
+                if (cell == .alive) {
+                    try self.set(x, y, Color.rgb(255, 255, 255));
+                } else {
+                    try self.set(x, y, Color.rgb(0, 0, 0));
+                }
+            }
+        }
     }
 
     pub fn paste(self: *const Cursor, pool: vk.CommandPool, dst_image: vk.Image, x: i32, y: i32) !void {
         // copy cursor to compute initial buffer (which is the last frame)
-        const src_rect = Rect.init(0, 0, self.width, self.height);
-        const dst_rect = Rect.init(x, y, self.width, self.height);
+        const src_rect = Rect.init(0, 0, @intCast(self.width), @intCast(self.height));
+        const dst_rect = Rect.init(x, y, @intCast(self.width), @intCast(self.height));
 
         try blitImage(self.ctx, pool, self.image, dst_image, src_rect, dst_rect);
     }
