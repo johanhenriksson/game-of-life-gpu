@@ -15,11 +15,17 @@ bool cell_alive(vec4 cell) {
 
 void main() {
     ivec2 cell = ivec2(gl_GlobalInvocationID.xy);
+    vec4 color = imageLoad(prev, cell);
 	ivec2 size = imageSize(next);
 
-    vec4 color = imageLoad(prev, cell);
+    if (pushConstants.enabled == 0) {
+        imageStore(next, cell, color); 
+        return;
+    }
+
     bool was_alive = cell_alive(color);
 
+    // count neighbors
     int neighbors = 0;
     if (was_alive) {
         neighbors = -1;
@@ -41,32 +47,32 @@ void main() {
         }
     }
 
+    // compute next iteration
     bool alive = was_alive;
-    if (pushConstants.enabled > 0) {
-        // execute logic
-        if (was_alive) {
-            if (neighbors < 2 || neighbors > 3) {
-                alive = false;
-            }
-        } else {
-            if (neighbors == 3) {
-                alive = true;
-            }
-        } 
-    }
+    if (was_alive) {
+        if (neighbors < 2 || neighbors > 3) {
+            alive = false;
+        }
+    } else {
+        if (neighbors == 3) {
+            alive = true;
+        }
+    } 
 
-    color.x = 0;
-    color.y *= 0.9;
-    color.z *= 0.9;
-    if (color.y < 0.01) {
-        color.y = 0;
-    }
-    if (color.z < 0.01) {
-        color.z = 0;
-    }
-
+    // compute pixel color based on alive state
     if (alive) {
-        color=vec4(1);
+        color = vec4(1);
+    } else {
+        color.x = 0;
+        color.y *= 0.9;
+        color.z *= 0.9;
+        if (color.y < 0.02) {
+            color.y = 0;
+        }
+        if (color.z < 0.02) {
+            color.z = 0;
+        }
     }
+
     imageStore(next, cell, color); 
 }

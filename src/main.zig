@@ -1,26 +1,22 @@
-const std = @import("std");
 const sdl = @import("sdl2");
+const std = @import("std");
 const vk = @import("vulkan");
-const Vertex = @import("graphics_pipe.zig").Vertex;
+const zm = @import("zmath");
+
 const ComputePipe = @import("compute_pipe.zig").ComputePipe;
 const ComputeArgs = @import("compute_pipe.zig").PushConstants;
 const GraphicsPipe = @import("graphics_pipe.zig").GraphicsPipe;
 const GraphicsArgs = @import("graphics_pipe.zig").GraphicsArgs;
 const VkContext = @import("context.zig").VkContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
-const Allocator = std.mem.Allocator;
-const Viewport = @import("viewport.zig").Viewport;
-const Pattern = @import("pattern.zig").Pattern;
-
-const zm = @import("zmath");
-const Vec2 = @import("primitives.zig").Vec2;
-const Rect = @import("primitives.zig").Rect;
-const Color = @import("primitives.zig").Color;
-const transitionImages = @import("helper.zig").transitionImages;
-const copyBuffer = @import("helper.zig").copyBuffer;
 
 const Cursor = @import("cursor.zig").Cursor;
 const CursorView = @import("cursor.zig").CursorView;
+const Viewport = @import("viewport.zig").Viewport;
+const WorldView = @import("world.zig").WorldView;
+const Pattern = @import("pattern.zig").Pattern;
+
+const Vec2 = @import("primitives.zig").Vec2;
 
 const app_name = "zulkan";
 
@@ -59,7 +55,13 @@ pub fn main() !void {
 
     std.debug.print("Created swapchain with {d} images\n", .{swapchain.swap_images.len});
 
-    var compute = try ComputePipe.init(&ctx, allocator, vk.Extent2D{
+    const pool = try ctx.vkd.createCommandPool(ctx.dev, &.{
+        .flags = .{},
+        .queue_family_index = ctx.graphics_queue.family,
+    }, null);
+    defer ctx.vkd.destroyCommandPool(ctx.dev, pool, null);
+
+    var compute = try ComputePipe.init(&ctx, allocator, pool, vk.Extent2D{
         .width = 1000,
         .height = 1000,
     });
@@ -68,11 +70,13 @@ pub fn main() !void {
     var graphics = try GraphicsPipe.init(&ctx, &swapchain, allocator);
     defer graphics.deinit();
 
-    const pool = try ctx.vkd.createCommandPool(ctx.dev, &.{
-        .flags = .{},
-        .queue_family_index = ctx.graphics_queue.family,
-    }, null);
-    defer ctx.vkd.destroyCommandPool(ctx.dev, pool, null);
+    var world = try WorldView.init(
+        &ctx,
+        allocator,
+        &graphics,
+        &compute,
+    );
+    defer world.deinit();
 
     var viewport = try Viewport.init(
         &ctx,
@@ -101,29 +105,6 @@ pub fn main() !void {
     defer cursor_view.deinit();
 
     try cursor.setPattern(&biggest_pattern);
-
-    try transitionImages(&ctx, pool, compute.buffers, vk.ImageLayout.undefined, vk.ImageLayout.general);
-
-    for (0..swapchain.swap_images.len) |frame| {
-        ctx.vkd.updateDescriptorSets(ctx.dev, 1, &[_]vk.WriteDescriptorSet{
-            .{
-                .dst_set = graphics.descriptors[frame],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = vk.DescriptorType.combined_image_sampler,
-                .p_image_info = &[_]vk.DescriptorImageInfo{
-                    .{
-                        .sampler = compute.buffer_sampler[frame],
-                        .image_view = compute.buffer_views[frame],
-                        .image_layout = vk.ImageLayout.general,
-                    },
-                },
-                .p_buffer_info = &[_]vk.DescriptorBufferInfo{},
-                .p_texel_buffer_view = &[_]vk.BufferView{},
-            },
-        }, 0, null);
-    }
 
     var cmdbufs = [3]vk.CommandBuffer{ .null_handle, .null_handle, .null_handle };
 
@@ -235,6 +216,9 @@ pub fn main() !void {
             tick = true;
         }
 
+        // TODO: rewrite this
+        // awkward way to avoid releasing command buffers that are still in use
+
         // wait for the current frame to finish rendering
         // so that we can re-record its command buffer
         try swapchain.waitForRender();
@@ -249,12 +233,16 @@ pub fn main() !void {
             &graphics,
             &compute,
             pool,
-            swapchain.extent,
+            &world,
+            &cursor_view,
             frame,
             tick,
-            &cursor_view,
         );
         const cmdbuf = cmdbufs[frame];
+
+        //
+        // present frame
+        //
 
         const state = swapchain.present(cmdbuf) catch |err| switch (err) {
             error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
@@ -284,10 +272,10 @@ fn createCommandBuffers(
     gfx: *const GraphicsPipe,
     compute: *const ComputePipe,
     pool: vk.CommandPool,
-    extent: vk.Extent2D,
-    i: usize,
-    tick: bool,
+    world: *WorldView,
     cursor: *CursorView,
+    frame: usize,
+    tick: bool,
 ) !vk.CommandBuffer {
     var cmdbuf: vk.CommandBuffer = undefined;
 
@@ -298,24 +286,6 @@ fn createCommandBuffers(
     }, @ptrCast(&cmdbuf));
     errdefer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&cmdbuf));
 
-    const clear = vk.ClearValue{
-        .color = .{ .float_32 = .{ 0.00, 0.02, 0.02, 1 } },
-    };
-
-    const viewport = vk.Viewport{
-        .x = 0,
-        .y = 0,
-        .width = @as(f32, @floatFromInt(extent.width)),
-        .height = @as(f32, @floatFromInt(extent.height)),
-        .min_depth = 0,
-        .max_depth = 1,
-    };
-
-    const scissor = vk.Rect2D{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = extent,
-    };
-
     try ctx.vkd.beginCommandBuffer(cmdbuf, &.{
         .flags = .{},
         .p_inheritance_info = null,
@@ -325,19 +295,13 @@ fn createCommandBuffers(
     // execute compute shader
     //
 
-    ctx.vkd.cmdPushConstants(cmdbuf, compute.pipeline_layout, .{ .compute_bit = true }, 0, @sizeOf(ComputeArgs), @ptrCast(&ComputeArgs{
-        .enabled = if (tick) 1 else 0,
-    }));
-
-    ctx.vkd.cmdBindDescriptorSets(cmdbuf, .compute, compute.pipeline_layout, 0, 1, @ptrCast(&compute.descriptors[i]), 0, null);
-    ctx.vkd.cmdBindPipeline(cmdbuf, .compute, compute.pipeline);
-    ctx.vkd.cmdDispatch(cmdbuf, compute.extent.width, compute.extent.height, 1);
+    compute.execute(cmdbuf, frame, tick);
 
     // add a memory barrier to ensure the compute shader is finished before the graphics pipeline starts
     // compute shader (write) must finish before the fragment shader runs (read)
     ctx.vkd.cmdPipelineBarrier(cmdbuf, .{ .compute_shader_bit = true }, .{ .fragment_shader_bit = true }, .{}, 0, null, 0, null, 1, &[_]vk.ImageMemoryBarrier{
         .{
-            .image = compute.buffers[i],
+            .image = compute.buffers[frame],
             .src_access_mask = .{ .shader_write_bit = true },
             .dst_access_mask = .{ .shader_read_bit = true },
             .old_layout = .general,
@@ -355,59 +319,20 @@ fn createCommandBuffers(
     });
 
     //
-    // draw the graphics pipeline
+    // draw the graphics
     //
 
-    ctx.vkd.cmdSetViewport(cmdbuf, 0, 1, @as([*]const vk.Viewport, @ptrCast(&viewport)));
-    ctx.vkd.cmdSetScissor(cmdbuf, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor)));
-
-    // This needs to be a separate definition - see https://github.com/ziglang/zig/issues/7627.
-    const render_area = vk.Rect2D{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = extent,
-    };
-
-    ctx.vkd.cmdBeginRenderPass(cmdbuf, &.{
-        .render_pass = gfx.render_pass,
-        .framebuffer = gfx.framebuffers[i],
-        .render_area = render_area,
-        .clear_value_count = 1,
-        .p_clear_values = @as([*]const vk.ClearValue, @ptrCast(&clear)),
-    }, .@"inline");
-
-    ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, gfx.pipeline);
+    gfx.begin(cmdbuf, frame);
 
     // draw the world
-    // TODO: extract world rendering
-    ctx.vkd.cmdPushConstants(cmdbuf, gfx.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GraphicsArgs), @ptrCast(&GraphicsArgs{
-        .model = zm.scaling(@floatFromInt(compute.extent.width), @floatFromInt(compute.extent.height), 1),
-        // these should be uniform
-        .proj = view.matrix(),
-    }));
-    ctx.vkd.cmdBindDescriptorSets(cmdbuf, .graphics, gfx.pipeline_layout, 0, 1, @as([*]const vk.DescriptorSet, @ptrCast(&gfx.descriptors[i])), 0, null);
-    ctx.vkd.cmdDraw(cmdbuf, 6, 1, 0, 0);
+    world.draw(cmdbuf, view.matrix(), frame);
 
     // draw the cursor
-    cursor.draw(cmdbuf, view.matrix(), i);
+    cursor.draw(cmdbuf, view.matrix(), frame);
 
-    ctx.vkd.cmdEndRenderPass(cmdbuf);
+    gfx.end(cmdbuf);
+
     try ctx.vkd.endCommandBuffer(cmdbuf);
 
     return cmdbuf;
-}
-
-fn createGlider(cursor: *Cursor) !void {
-    const dead = Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
-    const alive = Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
-
-    cursor.clear();
-    try cursor.set(0, 0, dead);
-    try cursor.set(0, 1, dead);
-    try cursor.set(0, 2, alive);
-    try cursor.set(1, 0, alive);
-    try cursor.set(1, 1, dead);
-    try cursor.set(1, 2, alive);
-    try cursor.set(2, 0, dead);
-    try cursor.set(2, 1, alive);
-    try cursor.set(2, 2, alive);
 }

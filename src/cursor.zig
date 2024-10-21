@@ -8,8 +8,10 @@ const Vec2 = @import("primitives.zig").Vec2;
 const Pattern = @import("pattern.zig").Pattern;
 
 const VkContext = @import("context.zig").VkContext;
+const Shader = @import("shader.zig");
 const GraphicsPipe = @import("graphics_pipe.zig").GraphicsPipe;
 const GraphicsArgs = @import("graphics_pipe.zig").GraphicsArgs;
+const createPipeline = @import("graphics_pipe.zig").createPipeline;
 
 const transitionImage = @import("helper.zig").transitionImage;
 const blitImage = @import("helper.zig").blitImage;
@@ -144,6 +146,8 @@ pub const CursorView = struct {
 
     view: vk.ImageView,
     sampler: vk.Sampler,
+    pipeline: vk.Pipeline,
+    shader: vk.ShaderModule,
     descriptors: []vk.DescriptorSet,
 
     pub fn init(ctx: *const VkContext, allocator: std.mem.Allocator, cursor: *const Cursor, gfx: *GraphicsPipe) !CursorView {
@@ -214,12 +218,19 @@ pub const CursorView = struct {
             }, 0, null);
         }
 
+        const shader = try Shader.compile(ctx, allocator, Shader.Stage.fragment, "shaders/cursor.fs.glsl");
+
+        const pipeline = try createPipeline(ctx, gfx.pipeline_layout, gfx.render_pass, gfx.vertex, shader);
+
         return CursorView{
             .ctx = ctx,
             .gfx = gfx,
             .cursor = cursor,
+
             .view = view,
             .sampler = sampler,
+            .shader = shader,
+            .pipeline = pipeline,
             .descriptors = descriptors,
         };
     }
@@ -228,6 +239,8 @@ pub const CursorView = struct {
         self.ctx.vkd.destroySampler(self.ctx.dev, self.sampler, null);
         self.ctx.vkd.destroyImageView(self.ctx.dev, self.view, null);
         // todo: free descriptor sets somehow
+        self.ctx.vkd.destroyPipeline(self.ctx.dev, self.pipeline, null);
+        self.ctx.vkd.destroyShaderModule(self.ctx.dev, self.shader, null);
     }
 
     pub fn draw(self: *CursorView, cmdbuf: vk.CommandBuffer, view: zm.Mat, frame: usize) void {
@@ -235,6 +248,8 @@ pub const CursorView = struct {
         const translation = zm.translation(pos.x, pos.y, 0);
         const scaling = zm.scaling(@floatFromInt(self.cursor.width), @floatFromInt(self.cursor.height), 1);
         const model = zm.mul(scaling, translation);
+
+        self.ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, self.pipeline);
 
         self.ctx.vkd.cmdPushConstants(cmdbuf, self.gfx.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GraphicsArgs), @ptrCast(&GraphicsArgs{
             .proj = view,

@@ -16,12 +16,12 @@ pub const GraphicsPipe = struct {
     ctx: *const VkContext,
     allocator: std.mem.Allocator,
 
-    pipeline: vk.Pipeline,
     pipeline_layout: vk.PipelineLayout,
     descriptor_pool: vk.DescriptorPool,
     descriptor_layout: vk.DescriptorSetLayout,
     descriptors: []vk.DescriptorSet,
 
+    extent: vk.Extent2D,
     framebuffers: []vk.Framebuffer,
     render_pass: vk.RenderPass,
     vertex: vk.ShaderModule,
@@ -29,15 +29,15 @@ pub const GraphicsPipe = struct {
 
     pub fn init(ctx: *const VkContext, swapchain: *Swapchain, allocator: std.mem.Allocator) !GraphicsPipe {
         const frames = swapchain.swap_images.len;
-        const vertex = try Shader.compile(ctx, allocator, Shader.Stage.vertex, "shaders/viewport.vs.glsl");
-        const fragment = try Shader.compile(ctx, allocator, Shader.Stage.fragment, "shaders/viewport.fs.glsl");
+        const vertex = try Shader.compile(ctx, allocator, Shader.Stage.vertex, "shaders/rect.vs.glsl");
+        const fragment = try Shader.compile(ctx, allocator, Shader.Stage.fragment, "shaders/world.fs.glsl");
 
         const pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
             .max_sets = 1000,
             .pool_size_count = 1,
             .p_pool_sizes = &[_]vk.DescriptorPoolSize{
                 .{
-                    .type = vk.DescriptorType.combined_image_sampler,
+                    .type = .combined_image_sampler,
                     .descriptor_count = 1000,
                 },
             },
@@ -48,7 +48,7 @@ pub const GraphicsPipe = struct {
             .p_bindings = &[_]vk.DescriptorSetLayoutBinding{
                 .{
                     .binding = 0,
-                    .descriptor_type = vk.DescriptorType.combined_image_sampler,
+                    .descriptor_type = .combined_image_sampler,
                     .descriptor_count = 1,
                     .stage_flags = .{
                         .fragment_bit = true,
@@ -88,24 +88,16 @@ pub const GraphicsPipe = struct {
 
         const framebuffers = try createFramebuffers(ctx, allocator, render_pass, swapchain);
 
-        const pipeline = try createPipeline(
-            ctx,
-            pipeline_layout,
-            render_pass,
-            vertex,
-            fragment,
-        );
-
         return GraphicsPipe{
             .ctx = ctx,
             .allocator = allocator,
 
-            .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
             .descriptor_pool = pool,
             .descriptor_layout = layout,
             .descriptors = descriptors,
 
+            .extent = swapchain.extent,
             .framebuffers = framebuffers,
             .render_pass = render_pass,
             .vertex = vertex,
@@ -115,6 +107,7 @@ pub const GraphicsPipe = struct {
 
     pub fn resize(self: *GraphicsPipe, swapchain: *Swapchain) !void {
         self.deinitFramebuffers();
+        self.extent = swapchain.extent;
         self.framebuffers = try createFramebuffers(self.ctx, self.allocator, self.render_pass, swapchain);
     }
 
@@ -126,7 +119,6 @@ pub const GraphicsPipe = struct {
     }
 
     pub fn deinit(self: *GraphicsPipe) void {
-        self.ctx.vkd.destroyPipeline(self.ctx.dev, self.pipeline, null);
         self.ctx.vkd.destroyPipelineLayout(self.ctx.dev, self.pipeline_layout, null);
         self.ctx.vkd.destroyShaderModule(self.ctx.dev, self.vertex, null);
         self.ctx.vkd.destroyShaderModule(self.ctx.dev, self.fragment, null);
@@ -137,6 +129,41 @@ pub const GraphicsPipe = struct {
 
         self.deinitFramebuffers();
         self.ctx.vkd.destroyRenderPass(self.ctx.dev, self.render_pass, null);
+    }
+
+    pub fn begin(self: *const GraphicsPipe, cmdbuf: vk.CommandBuffer, frame: usize) void {
+        self.ctx.vkd.cmdSetViewport(cmdbuf, 0, 1, &[_]vk.Viewport{
+            .{
+                .x = 0,
+                .y = 0,
+                .width = @as(f32, @floatFromInt(self.extent.width)),
+                .height = @as(f32, @floatFromInt(self.extent.height)),
+                .min_depth = 0,
+                .max_depth = 1,
+            },
+        });
+
+        // This needs to be a separate definition - see https://github.com/ziglang/zig/issues/7627.
+        const render_area = vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.extent,
+        };
+
+        const clear = vk.ClearValue{
+            .color = .{ .float_32 = .{ 0.01, 0.01, 0.01, 1 } },
+        };
+
+        self.ctx.vkd.cmdBeginRenderPass(cmdbuf, &.{
+            .render_pass = self.render_pass,
+            .framebuffer = self.framebuffers[frame],
+            .render_area = render_area,
+            .clear_value_count = 1,
+            .p_clear_values = @as([*]const vk.ClearValue, @ptrCast(&clear)),
+        }, .@"inline");
+    }
+
+    pub fn end(self: *const GraphicsPipe, cmdbuf: vk.CommandBuffer) void {
+        self.ctx.vkd.cmdEndRenderPass(cmdbuf);
     }
 };
 
@@ -205,7 +232,7 @@ fn createRenderPass(gc: *const VkContext, swapchain: *Swapchain) !vk.RenderPass 
     }, null);
 }
 
-fn createPipeline(
+pub fn createPipeline(
     ctx: *const VkContext,
     layout: vk.PipelineLayout,
     render_pass: vk.RenderPass,
