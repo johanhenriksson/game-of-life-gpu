@@ -10,7 +10,6 @@ const zm = @import("zmath");
 pub const GraphicsArgs = struct {
     proj: zm.Mat,
     model: zm.Mat,
-    size: Vec2,
 };
 
 pub const GraphicsPipe = struct {
@@ -34,12 +33,12 @@ pub const GraphicsPipe = struct {
         const fragment = try Shader.compile(ctx, allocator, Shader.Stage.fragment, "shaders/viewport.fs.glsl");
 
         const pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
-            .max_sets = @intCast(frames),
+            .max_sets = 1000,
             .pool_size_count = 1,
             .p_pool_sizes = &[_]vk.DescriptorPoolSize{
                 .{
                     .type = vk.DescriptorType.combined_image_sampler,
-                    .descriptor_count = 100,
+                    .descriptor_count = 1000,
                 },
             },
         }, null);
@@ -64,9 +63,9 @@ pub const GraphicsPipe = struct {
         for (0..layouts.len) |i| {
             layouts[i] = layout;
         }
-        try ctx.vkd.allocateDescriptorSets(ctx.dev, &vk.DescriptorSetAllocateInfo{
+        try ctx.vkd.allocateDescriptorSets(ctx.dev, &.{
             .descriptor_pool = pool,
-            .descriptor_set_count = @intCast(frames),
+            .descriptor_set_count = @intCast(descriptors.len),
             .p_set_layouts = layouts.ptr,
         }, descriptors.ptr);
 

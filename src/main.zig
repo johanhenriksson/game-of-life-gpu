@@ -20,6 +20,7 @@ const transitionImages = @import("helper.zig").transitionImages;
 const copyBuffer = @import("helper.zig").copyBuffer;
 
 const Cursor = @import("cursor.zig").Cursor;
+const CursorView = @import("cursor.zig").CursorView;
 
 const app_name = "zulkan";
 
@@ -95,6 +96,9 @@ pub fn main() !void {
 
     var cursor = try Cursor.init(&ctx, pool, biggest_pattern.width, biggest_pattern.height);
     defer cursor.deinit();
+
+    var cursor_view = try CursorView.init(&ctx, allocator, &cursor, &graphics);
+    defer cursor_view.deinit();
 
     try cursor.setPattern(&biggest_pattern);
 
@@ -215,6 +219,9 @@ pub fn main() !void {
             }
         }
 
+        const mouse_world = viewport.screenToWorld(mouse);
+        cursor.setPosition(mouse_world);
+
         if (placeHeld) {
             const w = viewport.screenToWorld(Vec2{ .x = mouse.x, .y = mouse.y });
             try cursor.paste(pool, compute.buffers[prev_frame], @intFromFloat(w.x), @intFromFloat(w.y));
@@ -245,6 +252,7 @@ pub fn main() !void {
             swapchain.extent,
             frame,
             tick,
+            &cursor_view,
         );
         const cmdbuf = cmdbufs[frame];
 
@@ -264,8 +272,6 @@ pub fn main() !void {
 
             std.debug.print("(swap) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
         }
-
-        // std.time.sleep(1e8);
     }
     std.debug.print("Exiting...\n", .{});
 
@@ -281,6 +287,7 @@ fn createCommandBuffers(
     extent: vk.Extent2D,
     i: usize,
     tick: bool,
+    cursor: *CursorView,
 ) !vk.CommandBuffer {
     var cmdbuf: vk.CommandBuffer = undefined;
 
@@ -292,7 +299,7 @@ fn createCommandBuffers(
     errdefer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&cmdbuf));
 
     const clear = vk.ClearValue{
-        .color = .{ .float_32 = .{ 0.05, 0.05, 0.05, 1 } },
+        .color = .{ .float_32 = .{ 0.00, 0.02, 0.02, 1 } },
     };
 
     const viewport = vk.Viewport{
@@ -333,12 +340,12 @@ fn createCommandBuffers(
             .image = compute.buffers[i],
             .src_access_mask = .{ .shader_write_bit = true },
             .dst_access_mask = .{ .shader_read_bit = true },
-            .old_layout = vk.ImageLayout.general,
-            .new_layout = vk.ImageLayout.general,
+            .old_layout = .general,
+            .new_layout = .general,
             .src_queue_family_index = ctx.graphics_queue.family,
             .dst_queue_family_index = ctx.graphics_queue.family,
-            .subresource_range = vk.ImageSubresourceRange{
-                .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
                 .base_mip_level = 0,
                 .level_count = 1,
                 .base_array_layer = 0,
@@ -368,18 +375,20 @@ fn createCommandBuffers(
         .p_clear_values = @as([*]const vk.ClearValue, @ptrCast(&clear)),
     }, .@"inline");
 
-    ctx.vkd.cmdPushConstants(cmdbuf, gfx.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GraphicsArgs), @ptrCast(&GraphicsArgs{
-        .proj = view.matrix(),
-        .model = zm.scaling(@floatFromInt(compute.extent.width), @floatFromInt(compute.extent.height), 1),
-        .size = Vec2{
-            .x = @floatFromInt(compute.extent.width),
-            .y = @floatFromInt(compute.extent.height),
-        },
-    }));
-
-    ctx.vkd.cmdBindDescriptorSets(cmdbuf, .graphics, gfx.pipeline_layout, 0, 1, @as([*]const vk.DescriptorSet, @ptrCast(&gfx.descriptors[i])), 0, null);
     ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, gfx.pipeline);
+
+    // draw the world
+    // TODO: extract world rendering
+    ctx.vkd.cmdPushConstants(cmdbuf, gfx.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GraphicsArgs), @ptrCast(&GraphicsArgs{
+        .model = zm.scaling(@floatFromInt(compute.extent.width), @floatFromInt(compute.extent.height), 1),
+        // these should be uniform
+        .proj = view.matrix(),
+    }));
+    ctx.vkd.cmdBindDescriptorSets(cmdbuf, .graphics, gfx.pipeline_layout, 0, 1, @as([*]const vk.DescriptorSet, @ptrCast(&gfx.descriptors[i])), 0, null);
     ctx.vkd.cmdDraw(cmdbuf, 6, 1, 0, 0);
+
+    // draw the cursor
+    cursor.draw(cmdbuf, view.matrix(), i);
 
     ctx.vkd.cmdEndRenderPass(cmdbuf);
     try ctx.vkd.endCommandBuffer(cmdbuf);

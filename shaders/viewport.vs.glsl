@@ -24,7 +24,6 @@ int indices[6] = int[6](
 layout(push_constant) uniform PushConstants {
     mat4 proj;
     mat4 model;
-    vec2 size;
 } push;
 
 void main() {

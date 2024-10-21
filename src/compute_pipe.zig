@@ -231,7 +231,7 @@ pub const ComputePipe = struct {
     fn next_image(self: *ComputePipe, frame: usize) void {
         const prev = if (frame > 0) frame - 1 else self.buffers.len - 1;
 
-        self.ctx.vkd.updateDescriptorSets(self.ctx.dev, 1, &[_]vk.WriteDescriptorSet{
+        self.ctx.vkd.updateDescriptorSets(self.ctx.dev, 2, &[_]vk.WriteDescriptorSet{
             .{
                 .dst_set = self.descriptors[frame],
                 .dst_binding = 0,
@@ -248,8 +248,6 @@ pub const ComputePipe = struct {
                 .p_buffer_info = &[_]vk.DescriptorBufferInfo{},
                 .p_texel_buffer_view = &[_]vk.BufferView{},
             },
-        }, 0, null);
-        self.ctx.vkd.updateDescriptorSets(self.ctx.dev, 1, &[_]vk.WriteDescriptorSet{
             .{
                 .dst_set = self.descriptors[frame],
                 .dst_binding = 1,
