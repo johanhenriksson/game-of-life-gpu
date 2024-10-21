@@ -81,7 +81,7 @@ pub fn main() !void {
     );
     defer viewport.deinit();
 
-    var cursor = try Cursor.init(&ctx, pool, 3, 3);
+    var cursor = try Cursor.init(&ctx, pool);
     createGlider(&cursor);
     defer cursor.deinit();
 
@@ -374,9 +374,10 @@ fn createCommandBuffers(
     return cmdbuf;
 }
 
-fn createGlider(cursor: *const Cursor) void {
+fn createGlider(cursor: *Cursor) void {
     const alive = Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
 
+    cursor.clear();
     cursor.set(0, 0, alive);
     cursor.set(0, 1, alive);
     cursor.set(0, 2, alive);
