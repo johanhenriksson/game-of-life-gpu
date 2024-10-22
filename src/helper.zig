@@ -144,3 +144,61 @@ pub fn copyBuffer(gc: *const VkContext, pool: vk.CommandPool, dst: vk.Buffer, sr
     try gc.vkd.queueSubmit(gc.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
     try gc.vkd.queueWaitIdle(gc.graphics_queue.handle);
 }
+
+pub fn clearImage(ctx: *const VkContext, pool: vk.CommandPool, image: vk.Image, color: Color) !void {
+    var cmdbuf: vk.CommandBuffer = undefined;
+    try ctx.vkd.allocateCommandBuffers(ctx.dev, &.{
+        .command_pool = pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, @ptrCast(&cmdbuf));
+    defer ctx.vkd.freeCommandBuffers(ctx.dev, pool, 1, @ptrCast(&cmdbuf));
+
+    try ctx.vkd.beginCommandBuffer(cmdbuf, &.{
+        .flags = .{ .one_time_submit_bit = true },
+        .p_inheritance_info = null,
+    });
+
+    // Define clear color value
+    const clear_color = vk.ClearColorValue{
+        .float_32 = .{
+            @as(f32, @floatFromInt(color.r)) / 255.0,
+            @as(f32, @floatFromInt(color.g)) / 255.0,
+            @as(f32, @floatFromInt(color.b)) / 255.0,
+            @as(f32, @floatFromInt(color.a)) / 255.0,
+        },
+    };
+
+    // Define range to clear
+    const range = vk.ImageSubresourceRange{
+        .aspect_mask = .{ .color_bit = true },
+        .base_mip_level = 0,
+        .level_count = 1,
+        .base_array_layer = 0,
+        .layer_count = 1,
+    };
+
+    // Clear the image
+    ctx.vkd.cmdClearColorImage(
+        cmdbuf,
+        image,
+        .general, // Make sure image is in general layout
+        &clear_color,
+        1,
+        @ptrCast(&range),
+    );
+
+    try ctx.vkd.endCommandBuffer(cmdbuf);
+
+    const si = vk.SubmitInfo{
+        .wait_semaphore_count = 0,
+        .p_wait_semaphores = undefined,
+        .p_wait_dst_stage_mask = undefined,
+        .command_buffer_count = 1,
+        .p_command_buffers = @ptrCast(&cmdbuf),
+        .signal_semaphore_count = 0,
+        .p_signal_semaphores = undefined,
+    };
+    try ctx.vkd.queueSubmit(ctx.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
+    try ctx.vkd.queueWaitIdle(ctx.graphics_queue.handle);
+}

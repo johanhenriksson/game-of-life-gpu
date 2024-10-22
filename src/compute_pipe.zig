@@ -3,8 +3,10 @@ const vk = @import("vulkan");
 
 const VkContext = @import("context.zig").VkContext;
 const Shader = @import("shader.zig");
+const Color = @import("primitives.zig").Color;
 
 const transitionImages = @import("helper.zig").transitionImages;
+const clearImage = @import("helper.zig").clearImage;
 
 pub const ComputeArgs = struct {
     enabled: i32,
@@ -250,5 +252,12 @@ pub const ComputePipe = struct {
         self.ctx.vkd.cmdBindDescriptorSets(cmdbuf, .compute, self.pipeline_layout, 0, 1, @ptrCast(&self.descriptors[frame]), 0, null);
         self.ctx.vkd.cmdBindPipeline(cmdbuf, .compute, self.pipeline);
         self.ctx.vkd.cmdDispatch(cmdbuf, self.extent.width, self.extent.height, 1);
+    }
+
+    pub fn clear(self: *const ComputePipe, pool: vk.CommandPool) !void {
+        const empty = Color.rgb(0, 0, 0);
+        for (self.buffers) |buffer| {
+            try clearImage(self.ctx, pool, buffer, empty);
+        }
     }
 };

@@ -90,7 +90,7 @@ pub fn main() !void {
 
     var library = try Library.loadDir(allocator, "cells");
     const cursor_size = @max(library.max_width, library.max_height);
-    std.debug.print("Loaded {d} patterns\n", library.patterns.len);
+    std.debug.print("Loaded {d} patterns\n", .{library.patterns.len});
 
     std.debug.print("Creating cursor with size {d}x{d}\n", .{ cursor_size, cursor_size });
     var cursor = try Cursor.init(&ctx, pool, cursor_size);
@@ -128,6 +128,9 @@ pub fn main() !void {
                         },
                         .space => { // pause
                             simulating = !simulating;
+                        },
+                        .c => { // clear
+                            try compute.clear(pool);
                         },
 
                         // pan
