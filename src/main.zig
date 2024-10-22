@@ -88,7 +88,7 @@ pub fn main() !void {
     );
     defer viewport.deinit();
 
-    var library = try Library.loadDir(allocator, "cells");
+    var library = try Library.loadDir(allocator, "cool");
     const cursor_size = @max(library.max_width, library.max_height);
     std.debug.print("Loaded {d} patterns\n", .{library.patterns.len});
 
