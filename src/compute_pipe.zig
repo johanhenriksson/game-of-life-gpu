@@ -10,6 +10,7 @@ const clearImage = @import("helper.zig").clearImage;
 
 pub const ComputeArgs = struct {
     enabled: i32,
+    generation: i32,
 };
 
 pub const ComputePipe = struct {
@@ -25,6 +26,7 @@ pub const ComputePipe = struct {
     descriptors: []vk.DescriptorSet,
 
     extent: vk.Extent2D,
+    format: vk.Format,
     buffers: []vk.Image,
     buffer_views: []vk.ImageView,
     buffer_memory: []vk.DeviceMemory,
@@ -32,7 +34,7 @@ pub const ComputePipe = struct {
     pub fn init(ctx: *const VkContext, allocator: std.mem.Allocator, pool: vk.CommandPool, extent: vk.Extent2D) !ComputePipe {
         const shader = try Shader.compile(ctx, allocator, Shader.Stage.compute, "shaders/game_of_life.glsl");
         const frames = 3;
-        const format = vk.Format.r8g8_unorm;
+        const format = vk.Format.r8g8b8a8_unorm;
 
         const descriptor_pool = try ctx.vkd.createDescriptorPool(ctx.dev, &vk.DescriptorPoolCreateInfo{
             .max_sets = @intCast(frames),
@@ -100,7 +102,7 @@ pub const ComputePipe = struct {
                         .compute_bit = true,
                     },
                 },
-                .base_pipeline_handle = vk.Pipeline.null_handle,
+                .base_pipeline_handle = .null_handle,
                 .base_pipeline_index = 0,
             },
         }, null, @ptrCast(&pipeline));
@@ -126,15 +128,15 @@ pub const ComputePipe = struct {
                 .samples = .{
                     .@"1_bit" = true,
                 },
-                .tiling = vk.ImageTiling.optimal,
+                .tiling = .optimal,
                 .usage = .{
                     .sampled_bit = true,
                     .transfer_dst_bit = true,
                     .transfer_src_bit = true,
                     .storage_bit = true,
                 },
-                .sharing_mode = vk.SharingMode.exclusive,
-                .initial_layout = vk.ImageLayout.undefined,
+                .sharing_mode = .exclusive,
+                .initial_layout = .undefined,
             }, null);
             errdefer ctx.vkd.destroyImage(ctx.dev, buffers[i], null);
 
@@ -147,13 +149,13 @@ pub const ComputePipe = struct {
 
             buffer_views[i] = try ctx.vkd.createImageView(ctx.dev, &vk.ImageViewCreateInfo{
                 .image = buffers[i],
-                .view_type = vk.ImageViewType.@"2d",
+                .view_type = .@"2d",
                 .format = format,
                 .components = .{
-                    .r = vk.ComponentSwizzle.identity,
-                    .g = vk.ComponentSwizzle.identity,
-                    .b = vk.ComponentSwizzle.identity,
-                    .a = vk.ComponentSwizzle.identity,
+                    .r = .r,
+                    .g = .g,
+                    .b = .b,
+                    .a = .a,
                 },
                 .subresource_range = .{
                     .aspect_mask = .{
@@ -167,7 +169,7 @@ pub const ComputePipe = struct {
             }, null);
         }
 
-        try transitionImages(ctx, pool, buffers, vk.ImageLayout.undefined, vk.ImageLayout.general);
+        try transitionImages(ctx, pool, buffers, .undefined, .general);
 
         for (0..frames) |frame| {
             const prev = if (frame > 0) frame - 1 else buffers.len - 1;
@@ -220,6 +222,7 @@ pub const ComputePipe = struct {
             .descriptors = descriptors,
 
             .extent = extent,
+            .format = format,
             .buffers = buffers,
             .buffer_memory = buffer_memory,
             .buffer_views = buffer_views,
@@ -244,9 +247,10 @@ pub const ComputePipe = struct {
         self.allocator.free(self.buffer_memory);
     }
 
-    pub fn execute(self: *const ComputePipe, cmdbuf: vk.CommandBuffer, frame: usize, tick: bool) void {
+    pub fn execute(self: *const ComputePipe, cmdbuf: vk.CommandBuffer, frame: usize, tick: bool, generation: i32) void {
         self.ctx.vkd.cmdPushConstants(cmdbuf, self.pipeline_layout, .{ .compute_bit = true }, 0, @sizeOf(ComputeArgs), @ptrCast(&ComputeArgs{
             .enabled = if (tick) 1 else 0,
+            .generation = @mod(generation, 255),
         }));
 
         self.ctx.vkd.cmdBindDescriptorSets(cmdbuf, .compute, self.pipeline_layout, 0, 1, @ptrCast(&self.descriptors[frame]), 0, null);

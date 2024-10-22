@@ -151,6 +151,9 @@ pub const Library = struct {
         var pattern_list = std.ArrayList(Pattern).init(allocator);
         errdefer pattern_list.deinit();
 
+        // simple 1x1 block
+        try pattern_list.append(try Pattern.load(allocator, "empty", "O\n"));
+
         var max_width: usize = 0;
         var max_height: usize = 0;
         for (file_list.items) |file_name| {

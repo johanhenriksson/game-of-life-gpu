@@ -7,7 +7,8 @@ layout (rgba8, set = 0, binding = 1) readonly uniform image2D prev;
 
 layout(push_constant) uniform PushConstants {
     int enabled;
-} pushConstants;
+    int generation;
+} push;
 
 bool cell_alive(vec4 cell) {
     return cell.x > 0.5;
@@ -15,10 +16,10 @@ bool cell_alive(vec4 cell) {
 
 void main() {
     ivec2 cell = ivec2(gl_GlobalInvocationID.xy);
-    vec4 color = imageLoad(prev, cell);
 	ivec2 size = imageSize(next);
+    vec4 color = imageLoad(prev, cell);
 
-    if (pushConstants.enabled == 0) {
+    if (push.enabled == 0) {
         imageStore(next, cell, color); 
         return;
     }
@@ -51,27 +52,25 @@ void main() {
     bool alive = was_alive;
     if (was_alive) {
         if (neighbors < 2 || neighbors > 3) {
+            // died
             alive = false;
+            color.x = 0;
+            color.y = 0.8;
         }
     } else {
         if (neighbors == 3) {
+            // spawned
             alive = true;
+            color.x = 1;
+            color.z = push.generation / 255.0;
         }
     } 
 
     // compute pixel color based on alive state
     if (alive) {
-        color = vec4(1);
     } else {
-        color.x = 0;
+        // decay
         color.y *= 0.9;
-        color.z *= 0.9;
-        if (color.y < 0.02) {
-            color.y = 0;
-        }
-        if (color.z < 0.02) {
-            color.z = 0;
-        }
     }
 
     imageStore(next, cell, color); 

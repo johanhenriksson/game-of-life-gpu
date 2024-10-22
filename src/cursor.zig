@@ -11,6 +11,7 @@ const VkContext = @import("context.zig").VkContext;
 const Shader = @import("shader.zig");
 const GraphicsPipe = @import("graphics_pipe.zig").GraphicsPipe;
 const GraphicsArgs = @import("graphics_pipe.zig").GraphicsArgs;
+const Cell = @import("pattern.zig").Cell;
 const createPipeline = @import("graphics_pipe.zig").createPipeline;
 
 const transitionImage = @import("helper.zig").transitionImage;
@@ -103,7 +104,7 @@ pub const Cursor = struct {
     pub fn clear(self: *Cursor) !void {
         for (0..self.height) |y| {
             for (0..self.width) |x| {
-                try self.set(x, y, Color.rgb(0, 0, 0));
+                try self.set(x, y, .dead);
             }
         }
     }
@@ -117,23 +118,11 @@ pub const Cursor = struct {
         try self.clear();
     }
 
-    fn get(self: *const Cursor, x: usize, y: usize) !Color {
+    pub fn set(self: *Cursor, x: usize, y: usize, cell: Cell) !void {
         if (x < 0 or y < 0 or x >= self.size or y >= self.size) {
             return error.OutOfBounds;
         }
-        const row_start = self.layout.offset + (y * self.layout.row_pitch);
-        const pixel_offset = x * @sizeOf(Color);
-        const bytes: [*]const u8 = @ptrCast(self.ptr);
-        var color: Color = undefined;
-        const color_bytes: *[@sizeOf(Color)]u8 = @ptrCast(&color);
-        @memcpy(color_bytes, bytes[row_start + pixel_offset ..][0..@sizeOf(Color)]);
-        return color;
-    }
-
-    pub fn set(self: *Cursor, x: usize, y: usize, color: Color) !void {
-        if (x < 0 or y < 0 or x >= self.size or y >= self.size) {
-            return error.OutOfBounds;
-        }
+        const color: Color = if (cell == .alive) Color.rgb(255, 255, 0) else Color.rgb(0, 0, 0);
         const row_start = self.layout.offset + (y * self.layout.row_pitch);
         const pixel_offset = x * @sizeOf(Color);
         const bytes: [*]u8 = @ptrCast(self.ptr);
@@ -142,15 +131,12 @@ pub const Cursor = struct {
     }
 
     pub fn setPattern(self: *Cursor, pattern: *const Pattern) !void {
+        std.debug.print("set cursor pattern: {s}\n", .{pattern.name});
         try self.resize(pattern.width, pattern.height);
         for (0..pattern.height) |y| {
             for (0..pattern.width) |x| {
                 const cell = try pattern.get(x, y);
-                if (cell == .alive) {
-                    try self.set(x, y, Color.rgb(255, 255, 255));
-                } else {
-                    try self.set(x, y, Color.rgb(0, 0, 0));
-                }
+                try self.set(x, y, cell);
             }
         }
     }
@@ -165,21 +151,6 @@ pub const Cursor = struct {
         const dst_rect = Rect.init(x, y, @intCast(self.width), @intCast(self.height));
 
         try blitImage(self.ctx, pool, self.image, dst_image, src_rect, dst_rect);
-    }
-
-    pub fn print(self: *const Cursor) !void {
-        std.debug.print("Cursor {d},{d}:\n", .{ self.width, self.height });
-        for (0..self.height) |y| {
-            for (0..self.width) |x| {
-                const color = try self.get(x, y);
-                if (color.r > 0) {
-                    std.debug.print("O", .{});
-                } else {
-                    std.debug.print(".", .{});
-                }
-            }
-            std.debug.print("\n", .{});
-        }
     }
 };
 

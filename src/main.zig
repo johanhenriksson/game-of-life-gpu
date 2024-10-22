@@ -109,6 +109,7 @@ pub fn main() !void {
     var placeHeld = false;
     var panHeld = false;
     var mouse = Vec2{ .x = 0, .y = 0 };
+    var generation: i32 = 0;
 
     var running = true;
     var simulating = false;
@@ -148,6 +149,7 @@ pub fn main() !void {
                         },
                         .c => { // clear
                             try compute.clear(pool);
+                            generation = 0;
                         },
 
                         // pan
@@ -251,7 +253,9 @@ pub fn main() !void {
             &cursor_view,
             frame,
             tick,
+            generation,
         );
+        generation += 1;
         const cmdbuf = cmdbufs[frame];
 
         //
@@ -290,6 +294,7 @@ fn createCommandBuffers(
     cursor: *CursorView,
     frame: usize,
     tick: bool,
+    generation: i32,
 ) !vk.CommandBuffer {
     var cmdbuf: vk.CommandBuffer = undefined;
 
@@ -309,7 +314,7 @@ fn createCommandBuffers(
     // execute compute shader
     //
 
-    compute.execute(cmdbuf, frame, tick);
+    compute.execute(cmdbuf, frame, tick, generation);
 
     // add a memory barrier to ensure the compute shader is finished before the graphics pipeline starts
     // compute shader (write) must finish before the fragment shader runs (read)
