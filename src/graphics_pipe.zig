@@ -10,6 +10,8 @@ const zm = @import("zmath");
 pub const GraphicsArgs = struct {
     proj: zm.Mat,
     model: zm.Mat,
+    size: Vec2,
+    tex_scale: Vec2,
 };
 
 pub const GraphicsPipe = struct {
@@ -150,7 +152,7 @@ pub const GraphicsPipe = struct {
         };
 
         const clear = vk.ClearValue{
-            .color = .{ .float_32 = .{ 0.01, 0.01, 0.01, 1 } },
+            .color = .{ .float_32 = .{ 0.005, 0.005, 0.005, 1 } },
         };
 
         self.ctx.vkd.cmdBeginRenderPass(cmdbuf, &.{

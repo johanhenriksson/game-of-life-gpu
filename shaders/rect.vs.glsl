@@ -24,12 +24,14 @@ int indices[6] = int[6](
 layout(push_constant) uniform PushConstants {
     mat4 proj;
     mat4 model;
+    vec2 size;
+    vec2 tex_size;
 } push;
 
 void main() {
     int idx = indices[gl_VertexIndex];
-    vec2 pos = vertices[idx];
+    vec2 pos = vertices[idx] * push.size;
 
     gl_Position = push.proj * push.model * vec4(pos, 0, 1);
-    v_uv = uvs[idx];
+    v_uv = uvs[idx] * push.tex_size;
 }

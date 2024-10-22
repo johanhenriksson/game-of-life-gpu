@@ -13,40 +13,6 @@ pub const Pattern = struct {
     width: usize,
     height: usize,
 
-    pub fn loadDir(allocator: std.mem.Allocator, dir_path: []const u8) ![]Pattern {
-        var dir = try std.fs.cwd().openDir(dir_path, .{ .iterate = true });
-        defer dir.close();
-
-        var file_list = std.ArrayList([]const u8).init(allocator);
-        defer {
-            for (file_list.items) |item| {
-                allocator.free(item);
-            }
-            file_list.deinit();
-        }
-
-        var iter = dir.iterate();
-        while (try iter.next()) |entry| {
-            if (entry.kind == .file) {
-                const file_name = try allocator.dupe(u8, entry.name);
-                try file_list.append(file_name);
-            }
-        }
-
-        var pattern_list = std.ArrayList(Pattern).init(allocator);
-        errdefer pattern_list.deinit();
-
-        for (file_list.items) |file_name| {
-            const file_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, file_name });
-            defer allocator.free(file_path);
-            const pattern = try Pattern.loadFile(allocator, file_path);
-            std.debug.print("{s}\n", .{file_path});
-            try pattern_list.append(pattern);
-        }
-
-        return pattern_list.toOwnedSlice();
-    }
-
     pub fn loadFile(allocator: std.mem.Allocator, file_path: []const u8) !Pattern {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
@@ -118,10 +84,11 @@ pub const Pattern = struct {
         allocator.free(self.cells);
     }
 
-    pub fn print(self: *const Pattern) void {
+    pub fn print(self: *const Pattern) !void {
+        std.debug.print("{s} ({d}x{d}):\n", .{ self.name, self.width, self.height });
         for (0..self.height) |y| {
             for (0..self.width) |x| {
-                const cell = self.cells[self.width * y + x];
+                const cell = try self.get(x, y);
                 switch (cell) {
                     .dead => std.debug.print(".", .{}),
                     .alive => std.debug.print("O", .{}),
@@ -129,5 +96,80 @@ pub const Pattern = struct {
             }
             std.debug.print("\n", .{});
         }
+    }
+};
+
+pub const Library = struct {
+    patterns: []Pattern,
+    index: usize,
+    max_width: usize,
+    max_height: usize,
+
+    pub fn select(self: *Library, index: usize) !void {
+        if (index < 0 or index >= self.patterns.len) {
+            return error.OutOfBounds;
+        }
+        self.index = index;
+    }
+
+    pub fn current(self: *const Library) *Pattern {
+        return &self.patterns[self.index];
+    }
+
+    pub fn next(self: *Library) void {
+        self.index = (self.index + 1) % self.patterns.len;
+    }
+
+    pub fn prev(self: *Library) void {
+        self.index = (self.index + self.patterns.len - 1) % self.patterns.len;
+    }
+
+    pub fn random(self: *Library) void {
+        self.index = std.crypto.random.uintLessThan(usize, self.patterns.len);
+    }
+
+    pub fn loadDir(allocator: std.mem.Allocator, dir_path: []const u8) !Library {
+        var dir = try std.fs.cwd().openDir(dir_path, .{ .iterate = true });
+        defer dir.close();
+
+        var file_list = std.ArrayList([]const u8).init(allocator);
+        defer {
+            for (file_list.items) |item| {
+                allocator.free(item);
+            }
+            file_list.deinit();
+        }
+
+        var iter = dir.iterate();
+        while (try iter.next()) |entry| {
+            if (entry.kind == .file) {
+                const file_name = try allocator.dupe(u8, entry.name);
+                try file_list.append(file_name);
+            }
+        }
+
+        var pattern_list = std.ArrayList(Pattern).init(allocator);
+        errdefer pattern_list.deinit();
+
+        var max_width: usize = 0;
+        var max_height: usize = 0;
+        for (file_list.items) |file_name| {
+            const file_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, file_name });
+            defer allocator.free(file_path);
+            const pattern = try Pattern.loadFile(allocator, file_path);
+            try pattern_list.append(pattern);
+
+            std.debug.print("loaded {s} ({d}x{d})\n", .{ pattern.name, pattern.width, pattern.height });
+
+            max_width = @max(max_width, pattern.width);
+            max_height = @max(max_height, pattern.height);
+        }
+
+        return Library{
+            .index = 0,
+            .max_width = max_width,
+            .max_height = max_height,
+            .patterns = try pattern_list.toOwnedSlice(),
+        };
     }
 };

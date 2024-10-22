@@ -96,6 +96,7 @@ const DeviceDispatch = vk.DeviceWrapper(&[_]vk.ApiInfo{
             .destroyImage = true,
             .cmdPipelineBarrier = true,
             .getImageMemoryRequirements = true,
+            .getImageSubresourceLayout = true,
             .bindImageMemory = true,
             .cmdBlitImage = true,
             .createSampler = true,

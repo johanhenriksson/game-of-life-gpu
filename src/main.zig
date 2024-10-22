@@ -15,6 +15,7 @@ const CursorView = @import("cursor.zig").CursorView;
 const Viewport = @import("viewport.zig").Viewport;
 const WorldView = @import("world.zig").WorldView;
 const Pattern = @import("pattern.zig").Pattern;
+const Library = @import("pattern.zig").Library;
 
 const Vec2 = @import("primitives.zig").Vec2;
 
@@ -87,24 +88,19 @@ pub fn main() !void {
     );
     defer viewport.deinit();
 
-    const patterns = try Pattern.loadDir(allocator, "cells");
-    var biggest_pattern = patterns[0];
-    var biggest_size: usize = 0;
-    for (patterns) |pattern| {
-        const size = pattern.width * pattern.height;
-        if (size > biggest_size) {
-            biggest_pattern = pattern;
-            biggest_size = size;
-        }
-    }
+    var library = try Library.loadDir(allocator, "cells");
+    const cursor_size = @max(library.max_width, library.max_height);
+    std.debug.print("Loaded {d} patterns\n", library.patterns.len);
 
-    var cursor = try Cursor.init(&ctx, pool, biggest_pattern.width, biggest_pattern.height);
+    std.debug.print("Creating cursor with size {d}x{d}\n", .{ cursor_size, cursor_size });
+    var cursor = try Cursor.init(&ctx, pool, cursor_size);
     defer cursor.deinit();
+
+    library.random();
+    try cursor.setPattern(library.current());
 
     var cursor_view = try CursorView.init(&ctx, allocator, &cursor, &graphics);
     defer cursor_view.deinit();
-
-    try cursor.setPattern(&biggest_pattern);
 
     var cmdbufs = [3]vk.CommandBuffer{ .null_handle, .null_handle, .null_handle };
 
@@ -122,45 +118,43 @@ pub fn main() !void {
 
         while (sdl.pollEvent()) |event| {
             switch (event) {
-                sdl.Event.key_down => {
-                    if (event.key_down.keycode == sdl.Keycode.escape) {
-                        running = false;
-                    }
-                    if (event.key_down.keycode == sdl.Keycode.space) {
-                        simulating = !simulating;
-                    }
-                    if (event.key_down.keycode == sdl.Keycode.a) {
-                        viewport.pan(-10, 0);
-                    }
-                    if (event.key_down.keycode == sdl.Keycode.d) {
-                        viewport.pan(10, 0);
-                    }
-                    if (event.key_down.keycode == sdl.Keycode.w) {
-                        viewport.pan(0, -10);
-                    }
-                    if (event.key_down.keycode == sdl.Keycode.s) {
-                        viewport.pan(0, 10);
-                    }
-                },
                 sdl.Event.quit => {
                     running = false;
                 },
-                sdl.Event.window => |window_event| switch (window_event.type) {
-                    .resized => |resize_event| {
-                        const width: u32 = @intCast(resize_event.width);
-                        const height: u32 = @intCast(resize_event.height);
-                        if ((extent.width != width) or (extent.height != height)) {
-                            extent.width = width;
-                            extent.height = height;
-                            std.debug.print("(sdl) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
-                            try swapchain.recreate(extent);
-                            try graphics.resize(&swapchain);
-                            viewport.resize(@floatFromInt(extent.width), @floatFromInt(extent.height));
+                sdl.Event.key_down => {
+                    switch (event.key_down.keycode) {
+                        .escape => { // quit
+                            running = false;
+                        },
+                        .space => { // pause
+                            simulating = !simulating;
+                        },
 
-                            std.debug.print("(sdl) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
-                        }
-                    },
-                    else => {},
+                        // pan
+                        .a => viewport.pan(-10, 0),
+                        .d => viewport.pan(10, 0),
+                        .w => viewport.pan(0, -10),
+                        .s => viewport.pan(0, 10),
+
+                        .r => { // random cursor
+                            library.random();
+                            try cursor.setPattern(library.current());
+                        },
+                        .@"1" => { // select first pattern
+                            try library.select(0);
+                            try cursor.setPattern(library.current());
+                        },
+                        .n => {
+                            library.next();
+                            try cursor.setPattern(library.current());
+                        },
+                        .p => {
+                            library.prev();
+                            try cursor.setPattern(library.current());
+                        },
+
+                        else => {},
+                    }
                 },
                 sdl.Event.mouse_button_down => |down| {
                     mouse = Vec2{ .x = @floatFromInt(down.x), .y = @floatFromInt(down.y) };
@@ -204,8 +198,8 @@ pub fn main() !void {
         cursor.setPosition(mouse_world);
 
         if (placeHeld) {
-            const w = viewport.screenToWorld(Vec2{ .x = mouse.x, .y = mouse.y });
-            try cursor.paste(pool, compute.buffers[prev_frame], @intFromFloat(w.x), @intFromFloat(w.y));
+            // const w = viewport.screenToWorld(Vec2{ .x = mouse.x, .y = mouse.y });
+            // try cursor.paste(pool, compute.buffers[prev_frame], @intFromFloat(w.x), @intFromFloat(w.y));
         }
 
         const now = try std.time.Instant.now();

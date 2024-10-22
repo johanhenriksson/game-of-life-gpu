@@ -17,7 +17,6 @@ const transitionImage = @import("helper.zig").transitionImage;
 const blitImage = @import("helper.zig").blitImage;
 
 pub const Cursor = struct {
-    pixels: []Color,
     width: usize,
     height: usize,
     position: Vec2,
@@ -25,19 +24,21 @@ pub const Cursor = struct {
     image: vk.Image,
     buffer: vk.Buffer,
     memory: vk.DeviceMemory,
-    max_width: usize,
-    max_height: usize,
+    layout: vk.SubresourceLayout,
+    size: usize,
+    ptr: ?*anyopaque,
 
     ctx: *const VkContext,
 
-    pub fn init(ctx: *const VkContext, pool: vk.CommandPool, max_width: usize, max_height: usize) !Cursor {
+    pub fn init(ctx: *const VkContext, pool: vk.CommandPool, size: usize) !Cursor {
+        // create an image and allocate gpu memory
         const image = try ctx.vkd.createImage(ctx.dev, &.{
             .flags = .{},
             .image_type = .@"2d",
             .format = .r8g8b8a8_unorm,
             .extent = .{
-                .width = @intCast(max_width),
-                .height = @intCast(max_height),
+                .width = @intCast(size),
+                .height = @intCast(size),
                 .depth = 1,
             },
             .mip_levels = 1,
@@ -48,12 +49,21 @@ pub const Cursor = struct {
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
-            .initial_layout = .preinitialized,
+            .initial_layout = .undefined,
         }, null);
         const mem_req = ctx.vkd.getImageMemoryRequirements(ctx.dev, image);
         const memory = try ctx.allocate(mem_req, .{ .host_visible_bit = true, .host_coherent_bit = true });
         try ctx.vkd.bindImageMemory(ctx.dev, image, memory, 0);
 
+        // grab the image layout
+        const subresource = vk.ImageSubresource{
+            .aspect_mask = .{ .color_bit = true },
+            .mip_level = 0,
+            .array_layer = 0,
+        };
+        const layout = ctx.vkd.getImageSubresourceLayout(ctx.dev, image, &subresource);
+
+        // create a buffer object over the image memory
         const buffer = try ctx.vkd.createBuffer(ctx.dev, &.{
             .flags = .{},
             .size = mem_req.size,
@@ -64,22 +74,21 @@ pub const Cursor = struct {
         }, null);
         try ctx.vkd.bindBufferMemory(ctx.dev, buffer, memory, 0);
 
-        const cursor_image_ptr = try ctx.vkd.mapMemory(ctx.dev, memory, 0, vk.WHOLE_SIZE, .{});
-        const cursor_image_colors: [*]Color = @ptrCast(@alignCast(cursor_image_ptr));
-        const pixels: []Color = cursor_image_colors[0..@intCast(max_width * max_height)];
+        // get a pointer to the gpu memory
+        const ptr = try ctx.vkd.mapMemory(ctx.dev, memory, 0, vk.WHOLE_SIZE, .{});
 
         try transitionImage(ctx, pool, image, .undefined, .general);
 
         return .{
             .ctx = ctx,
-            .pixels = pixels,
             .width = 0,
             .height = 0,
-            .max_width = max_width,
-            .max_height = max_height,
+            .size = size,
+            .layout = layout,
             .image = image,
             .buffer = buffer,
             .memory = memory,
+            .ptr = ptr,
             .position = Vec2{ .x = 0, .y = 0 },
         };
     }
@@ -91,28 +100,49 @@ pub const Cursor = struct {
         self.ctx.vkd.destroyBuffer(self.ctx.dev, self.buffer, null);
     }
 
-    pub fn clear(self: *Cursor) void {
-        for (0..self.pixels.len) |i| {
-            self.pixels[i] = Color.rgb(0, 0, 0);
+    pub fn clear(self: *Cursor) !void {
+        for (0..self.height) |y| {
+            for (0..self.width) |x| {
+                try self.set(x, y, Color.rgb(0, 0, 0));
+            }
         }
-        self.width = 0;
-        self.height = 0;
+    }
+
+    pub fn resize(self: *Cursor, width: usize, height: usize) !void {
+        if (width < 0 or width > self.size or height < 0 or height > self.size) {
+            return error.OutOfBounds;
+        }
+        self.width = width;
+        self.height = height;
+        try self.clear();
+    }
+
+    fn get(self: *const Cursor, x: usize, y: usize) !Color {
+        if (x < 0 or y < 0 or x >= self.size or y >= self.size) {
+            return error.OutOfBounds;
+        }
+        const row_start = self.layout.offset + (y * self.layout.row_pitch);
+        const pixel_offset = x * @sizeOf(Color);
+        const bytes: [*]const u8 = @ptrCast(self.ptr);
+        var color: Color = undefined;
+        const color_bytes: *[@sizeOf(Color)]u8 = @ptrCast(&color);
+        @memcpy(color_bytes, bytes[row_start + pixel_offset ..][0..@sizeOf(Color)]);
+        return color;
     }
 
     pub fn set(self: *Cursor, x: usize, y: usize, color: Color) !void {
-        if (x < 0 or x >= self.max_width or y < 0 or y >= self.max_height) {
+        if (x < 0 or y < 0 or x >= self.size or y >= self.size) {
             return error.OutOfBounds;
         }
-        self.width = @max(self.width, x + 1);
-        self.height = @max(self.height, y + 1);
-        self.pixels[y * self.max_width + x] = color;
+        const row_start = self.layout.offset + (y * self.layout.row_pitch);
+        const pixel_offset = x * @sizeOf(Color);
+        const bytes: [*]u8 = @ptrCast(self.ptr);
+        const color_bytes: *const [@sizeOf(Color)]u8 = @ptrCast(&color);
+        @memcpy(bytes[row_start + pixel_offset ..][0..@sizeOf(Color)], color_bytes);
     }
 
     pub fn setPattern(self: *Cursor, pattern: *const Pattern) !void {
-        if (pattern.width > self.max_width or pattern.height > self.max_height) {
-            return error.OutOfBounds;
-        }
-        self.clear();
+        try self.resize(pattern.width, pattern.height);
         for (0..pattern.height) |y| {
             for (0..pattern.width) |x| {
                 const cell = try pattern.get(x, y);
@@ -135,6 +165,21 @@ pub const Cursor = struct {
         const dst_rect = Rect.init(x, y, @intCast(self.width), @intCast(self.height));
 
         try blitImage(self.ctx, pool, self.image, dst_image, src_rect, dst_rect);
+    }
+
+    pub fn print(self: *const Cursor) !void {
+        std.debug.print("Cursor {d},{d}:\n", .{ self.width, self.height });
+        for (0..self.height) |y| {
+            for (0..self.width) |x| {
+                const color = try self.get(x, y);
+                if (color.r > 0) {
+                    std.debug.print("O", .{});
+                } else {
+                    std.debug.print(".", .{});
+                }
+            }
+            std.debug.print("\n", .{});
+        }
     }
 };
 
@@ -245,15 +290,21 @@ pub const CursorView = struct {
 
     pub fn draw(self: *CursorView, cmdbuf: vk.CommandBuffer, view: zm.Mat, frame: usize) void {
         const pos = self.cursor.position;
-        const translation = zm.translation(pos.x, pos.y, 0);
-        const scaling = zm.scaling(@floatFromInt(self.cursor.width), @floatFromInt(self.cursor.height), 1);
-        const model = zm.mul(scaling, translation);
+        const model = zm.translation(@floor(pos.x), @floor(pos.y), 0);
 
         self.ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, self.pipeline);
 
         self.ctx.vkd.cmdPushConstants(cmdbuf, self.gfx.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GraphicsArgs), @ptrCast(&GraphicsArgs{
             .proj = view,
             .model = model,
+            .size = Vec2{
+                .x = @floatFromInt(self.cursor.width),
+                .y = @floatFromInt(self.cursor.height),
+            },
+            .tex_scale = Vec2{
+                .x = @as(f32, @floatFromInt(self.cursor.width)) / @as(f32, @floatFromInt(self.cursor.size)),
+                .y = @as(f32, @floatFromInt(self.cursor.height)) / @as(f32, @floatFromInt(self.cursor.size)),
+            },
         }));
         self.ctx.vkd.cmdBindDescriptorSets(cmdbuf, .graphics, self.gfx.pipeline_layout, 0, 1, @as([*]const vk.DescriptorSet, @ptrCast(&self.descriptors[frame])), 0, null);
         self.ctx.vkd.cmdDraw(cmdbuf, 6, 1, 0, 0);

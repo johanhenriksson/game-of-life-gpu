@@ -104,14 +104,18 @@ pub const WorldView = struct {
     }
 
     pub fn draw(self: *WorldView, cmdbuf: vk.CommandBuffer, view: zm.Mat, frame: usize) void {
-        const scaling = zm.scaling(@floatFromInt(self.compute.extent.width), @floatFromInt(self.compute.extent.height), 1);
-        const model = scaling;
+        const model = zm.identity();
 
         self.ctx.vkd.cmdBindPipeline(cmdbuf, .graphics, self.pipeline);
 
         self.ctx.vkd.cmdPushConstants(cmdbuf, self.gfx.pipeline_layout, .{ .vertex_bit = true, .fragment_bit = true }, 0, @sizeOf(GraphicsArgs), @ptrCast(&GraphicsArgs{
             .proj = view,
             .model = model,
+            .size = Vec2{
+                .x = @floatFromInt(self.compute.extent.width),
+                .y = @floatFromInt(self.compute.extent.height),
+            },
+            .tex_scale = Vec2{ .x = 1, .y = 1 },
         }));
         self.ctx.vkd.cmdBindDescriptorSets(cmdbuf, .graphics, self.gfx.pipeline_layout, 0, 1, @as([*]const vk.DescriptorSet, @ptrCast(&self.descriptors[frame])), 0, null);
         self.ctx.vkd.cmdDraw(cmdbuf, 6, 1, 0, 0);
