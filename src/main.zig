@@ -121,6 +121,23 @@ pub fn main() !void {
                 sdl.Event.quit => {
                     running = false;
                 },
+                sdl.Event.window => |window_event| switch (window_event.type) {
+                    .resized => |resize_event| {
+                        const width: u32 = @intCast(resize_event.width);
+                        const height: u32 = @intCast(resize_event.height);
+                        if ((extent.width != width) or (extent.height != height)) {
+                            extent.width = width;
+                            extent.height = height;
+                            std.debug.print("(sdl) Resizing to: {d}x{d}\n", .{ extent.width, extent.height });
+                            try swapchain.recreate(extent);
+                            try graphics.resize(&swapchain);
+                            viewport.resize(@floatFromInt(extent.width), @floatFromInt(extent.height));
+
+                            std.debug.print("(sdl) Resized to: {d}x{d}\n", .{ extent.width, extent.height });
+                        }
+                    },
+                    else => {},
+                },
                 sdl.Event.key_down => {
                     switch (event.key_down.keycode) {
                         .escape => { // quit
