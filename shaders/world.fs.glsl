@@ -6,9 +6,10 @@ layout(location = 0) out vec4 f_color;
 
 layout(binding = 0) uniform sampler2D image;
 
-vec3 empty = vec3(0);
+vec3 empty = vec3(0, 0, 0.01);
 
 vec3 getGradient(vec4 c1, vec4 c2, vec4 c3, vec4 c4, float value_);
+vec3 grad3(vec3 a, vec3 b, vec3 c, float v);
 
 vec3 magic(float v) {
     return getGradient(
@@ -31,17 +32,32 @@ vec3 magic2(float v) {
 }
 
 vec3 magic3(float v) {
+    return grad3(
+        vec3(0.310, 0.110, 0.941),
+        vec3(0.490, 0.988, 0.247),
+        vec3(0.988, 0.384, 0.227),
+        v
+    );
+}
+
+vec3 grad3(vec3 a, vec3 b, vec3 c, float v) {
     return getGradient(
-        vec4(0.310, 0.110, 0.941, 0),
-        vec4(0.490, 0.988, 0.247, 0.33),
-        vec4(0.988, 0.384, 0.227, 0.67),
-        vec4(0.310, 0.110, 0.941, 1),
+        vec4(a, 0),
+        vec4(b, 0.33),
+        vec4(c, 0.67),
+        vec4(a, 1),
         v
     );
 }
 
 void main() {
     vec4 cell = texture(image, v_uv);
+
+    float e = 0.001;
+    if (v_uv.x < e || v_uv.y < e || v_uv.x > 1 - e || v_uv.y > 1 - e) {
+        f_color = vec4(1, 1, 1, 1);
+        return;
+    }
 
     // pick color based on generation
     vec3 grad = magic2(cell.z);

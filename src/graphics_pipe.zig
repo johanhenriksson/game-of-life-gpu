@@ -152,7 +152,7 @@ pub const GraphicsPipe = struct {
         };
 
         const clear = vk.ClearValue{
-            .color = .{ .float_32 = .{ 0.005, 0.005, 0.005, 1 } },
+            .color = .{ .float_32 = .{ 0.0, 0.0, 0.01, 1 } },
         };
 
         self.ctx.vkd.cmdBeginRenderPass(cmdbuf, &.{
