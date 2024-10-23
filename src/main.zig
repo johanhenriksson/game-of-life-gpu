@@ -96,7 +96,19 @@ pub fn main() !void {
     var cursor = try Cursor.init(&ctx, pool, cursor_size);
     defer cursor.deinit();
 
-    library.random();
+    // title screen
+    const logo_title = try Pattern.loadFile(allocator, "title/gol.cells");
+    const logo_codecation = try Pattern.loadFile(allocator, "title/codecation.cells");
+    const logo_2024 = try Pattern.loadFile(allocator, "title/2024.cells");
+    try cursor.setPattern(&logo_title);
+    try cursor.paste(pool, compute.buffers[2], @intCast(compute.extent.width / 2 - logo_title.width / 2), @intCast(compute.extent.height / 2 - logo_title.height - 30));
+    try cursor.setPattern(&logo_codecation);
+    try cursor.paste(pool, compute.buffers[2], @intCast(compute.extent.width / 2 - logo_codecation.width / 2), @intCast(compute.extent.height / 2 - logo_codecation.height));
+    try cursor.setPattern(&logo_2024);
+    try cursor.paste(pool, compute.buffers[2], @intCast(compute.extent.width / 2 - logo_title.width / 2), @intCast(compute.extent.height / 2 - logo_2024.height + 30));
+
+    // setup cursor
+    try library.select(0);
     try cursor.setPattern(library.current());
 
     var cursor_view = try CursorView.init(&ctx, allocator, &cursor, &graphics);
@@ -166,11 +178,11 @@ pub fn main() !void {
                             try library.select(0);
                             try cursor.setPattern(library.current());
                         },
-                        .n => {
+                        .f => {
                             library.next();
                             try cursor.setPattern(library.current());
                         },
-                        .p => {
+                        .v => {
                             library.prev();
                             try cursor.setPattern(library.current());
                         },
