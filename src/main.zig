@@ -116,7 +116,7 @@ pub fn main() !void {
 
     var cmdbufs = [3]vk.CommandBuffer{ .null_handle, .null_handle, .null_handle };
 
-    const interval = 1e9 / 20;
+    var fps: u64 = 20;
     var lastTick = try std.time.Instant.now();
     var placeHeld = false;
     var panHeld = false;
@@ -162,6 +162,14 @@ pub fn main() !void {
                         .c => { // clear
                             try compute.clear(pool);
                             generation = 0;
+                        },
+                        .z => {
+                            fps = @max(fps - 1, 1);
+                            std.debug.print("Target fps: {d}\n", .{fps});
+                        },
+                        .x => {
+                            fps = @min(fps + 1, 100);
+                            std.debug.print("Target fps: {d}\n", .{fps});
                         },
 
                         // pan
@@ -238,6 +246,7 @@ pub fn main() !void {
 
         const now = try std.time.Instant.now();
         const elapsed = now.since(lastTick);
+        const interval: u64 = @divFloor(1_000_000_000, fps);
         var tick = false;
         if (simulating and elapsed > interval) {
             lastTick = now;
