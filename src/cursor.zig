@@ -104,7 +104,7 @@ pub const Cursor = struct {
     pub fn clear(self: *Cursor) !void {
         for (0..self.height) |y| {
             for (0..self.width) |x| {
-                try self.set(x, y, .dead);
+                try self.set(x, y, .dead, 0);
             }
         }
     }
@@ -118,11 +118,11 @@ pub const Cursor = struct {
         try self.clear();
     }
 
-    pub fn set(self: *Cursor, x: usize, y: usize, cell: Cell) !void {
+    pub fn set(self: *Cursor, x: usize, y: usize, cell: Cell, gen: u8) !void {
         if (x < 0 or y < 0 or x >= self.size or y >= self.size) {
             return error.OutOfBounds;
         }
-        const color: Color = if (cell == .alive) Color.rgb(255, 255, 0) else Color.rgb(0, 0, 0);
+        const color: Color = if (cell == .alive) Color.rgb(255, 255, gen) else Color.rgb(0, 0, 0);
         const row_start = self.layout.offset + (y * self.layout.row_pitch);
         const pixel_offset = x * @sizeOf(Color);
         const bytes: [*]u8 = @ptrCast(self.ptr);
@@ -131,12 +131,13 @@ pub const Cursor = struct {
     }
 
     pub fn setPattern(self: *Cursor, pattern: *const Pattern) !void {
+        const gen = std.crypto.random.uintAtMost(u8, 255);
         std.debug.print("set cursor pattern: {s}\n", .{pattern.name});
         try self.resize(pattern.width, pattern.height);
         for (0..pattern.height) |y| {
             for (0..pattern.width) |x| {
                 const cell = try pattern.get(x, y);
-                try self.set(x, y, cell);
+                try self.set(x, y, cell, gen);
             }
         }
     }
